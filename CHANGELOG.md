@@ -4,6 +4,13 @@ All notable public changes are documented here. This log covers only the sanitiz
 
 ## [Unreleased]
 
+### Added — minimal CLI and inert findings
+
+- `python -m modou check -t <tests>` reviews a local repository's changes without the local service or web build. It prints findings grouped by label with the named regressing tests, supports `--base`, `--patch`, `--format json` and `--fail-on` for CI, and exits 0 / 1 / 2 for done / `--fail-on` hit / bad input or failed review.
+- Inert findings (experimental) are shown by default in the CLI: the declared tests execute the addition, yet all still pass after it is removed. `--three-state` restores the previous output. The web cockpit still presents three states.
+- New H3 guard: an inert unit that contains never-executed lines, such as an untested function whose `def` line only ran at import time, is no longer labelled inert; its executed lines become `unlabeled / inert_hollow`. The guard is implemented in both the engine merge and the ledger derivation, so derive parity still holds.
+- `analyze_patch` accepts an optional `event_sink` for progress reporting.
+
 ### Documentation maintenance — 2026-09-18
 
 - Restore the bilingual product introduction, reversible-experiment explanation, language and license badges, navigation, and copyable quick-start commands.

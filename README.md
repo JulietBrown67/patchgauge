@@ -40,6 +40,7 @@ Verify whether newly added code is genuinely constrained by tests through revers
 - **承重**：临时移除候选代码后，出现具名测试失败。
 - **无据**：声明的测试范围没有为该候选提供足够约束。
 - **游离**：新增文件未进入已观察到的测试或引用路径。
+- **惰性**（实验性，命令行默认呈现）：测试执行到了这段新增代码，但临时移除后声明测试全部照样通过——测试可能只跑不断言。它不证明可以安全删除；所在单元含从未执行的行时（例如只执行了 def 行的未测函数）不判惰性。
 - **边界纪律**：结论只适用于实际运行的代码、测试范围和环境，不等于证明代码正确、可安全删除或语义等价。环境异常或证据不足时，可能返回不可判定。
 
 ## v0.2 可以做什么
@@ -68,6 +69,17 @@ python -m pip install -r requirements-agent.in
 python demo/build_demo.py
 python demo/run_demo.py
 ```
+
+**检查你自己的仓库**（不需要前端和本地服务；只在你信任的仓库上运行，它会执行仓库的测试）：
+
+```bash
+cd /path/to/your/repo
+python -m modou check -t tests/                      # 审查工作树相对 HEAD 的未提交改动
+python -m modou check -t tests/ --base main          # 审查相对 main 的全部改动
+python -m modou check -t tests/ --format json --fail-on inert,unevidenced   # 用于 CI
+```
+
+需要在装有 pytest 与 coverage 的环境中运行，并让 `modou` 可被导入（例如 `PYTHONPATH=/path/to/modou-agent`），或用 `--python` 指定运行测试的解释器。退出码：0 完成，1 命中 `--fail-on`，2 输入错误或审查失败。`--three-state` 可恢复不呈现惰性结论的旧口径。
 
 启动本地工作台：
 
@@ -212,6 +224,7 @@ Local Git repository + declared test scope
 - **Load-bearing:** removing the candidate causes a named test to fail.
 - **Unevidenced:** the declared tests do not provide enough constraint for the candidate.
 - **Orphaned:** a new file is not reached by an observed test or reference path.
+- **Inert** (experimental, shown by default in the CLI): the declared tests execute the addition, yet all still pass after it is removed — the tests may run it without asserting on it. This is not proof that it can be deleted; a unit that contains never-executed lines (e.g. an untested function whose `def` line only ran at import time) is not labelled inert.
 - **Scope discipline:** results apply only to the reviewed code, executed tests and environment. They do not prove correctness, safe deletion or semantic equivalence. Missing evidence or execution problems may leave a result inconclusive.
 
 ### What is new in v0.2?
@@ -236,6 +249,17 @@ python -m modou.server \
   --allow-repo demo/retry_demo \
   --preset-config configs/review-presets.example.json
 ```
+
+To check your own repository without the web UI (trusted repositories only; it runs their tests):
+
+```bash
+cd /path/to/your/repo
+python -m modou check -t tests/                      # uncommitted changes vs HEAD
+python -m modou check -t tests/ --base main          # all changes vs main
+python -m modou check -t tests/ --format json --fail-on inert,unevidenced   # for CI
+```
+
+Run it where pytest and coverage are installed and `modou` is importable (e.g. `PYTHONPATH=/path/to/modou-agent`), or pass `--python` for the test interpreter. Exit codes: 0 done, 1 a `--fail-on` label was found, 2 bad input or failed review. `--three-state` restores the output without inert findings.
 
 Open the complete local URL printed by the server. The service binds to loopback and uses a startup token. Do not share token-bearing URLs. Select a project and requirement, approve the plan, read findings, validate candidates, confirm adoption and revalidate the new version.
 

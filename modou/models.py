@@ -126,6 +126,7 @@ class Unlabeled(str, Enum):
     UNSUPPORTED_FILE = "unsupported_file"          # 测试/配置/文档/二进制等不做探测的文件
     PROBE_TIMEOUT = "probe_timeout"                # 单次探测超时
     INERT_WITHHELD = "inert_withheld"              # 探测判为惰性，但四态版未通过 H3 护栏，不对外呈现
+    INERT_HOLLOW = "inert_hollow"                  # 删了单元测试不变，但单元内有从未执行的行：惰性对它不成立
     COLLATERAL_BREAKAGE = "collateral_breakage"    # 测试根本没执行（import 崩、收集期错误），不是行为约束
     ENVIRONMENT_SHIFT = "environment_shift"        # 跳过条件变了，与被测行为无关
 

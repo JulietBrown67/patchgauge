@@ -153,12 +153,15 @@ class RunHandle:
 
 # ------------------------------------------------------------------ 入口 1
 
-def analyze_patch(req: AnalysisRequest) -> RunHandle:
+def analyze_patch(req: AnalysisRequest, *, event_sink=None) -> RunHandle:
     """跑一次审查。**同步**——事件流与中断恢复是 Day 3 的事。
 
     引擎的失败关闭纪律在这里被保留而不是被吞掉：`InstanceFailed` 变成
     `status=FAILED` 的句柄，带上失败阶段。返回一个"看起来正常"的空结果，
     比抛异常危险得多。
+
+    `event_sink(kind, data)` 可选，用于 CLI 之类的调用方显示进度；
+    它只读事件，不影响判定。
     """
     from modou.analysis import InstanceFailed, analyze_resolved
     from .executor import (SandboxedExecutor, TrustedLocalExecutor,
@@ -178,7 +181,8 @@ def analyze_patch(req: AnalysisRequest) -> RunHandle:
                 run_metadata={"execution_mode": req.mode.value,
                               "execution_mode_label": req.mode.label,
                               "isolation_mode": req.mode.value,
-                              "input_kind": resolved.kind})
+                              "input_kind": resolved.kind},
+                event_sink=event_sink)
     except InstanceFailed as e:
         return RunHandle(run_id=run_id, status=RunStatus.FAILED, mode=req.mode,
                          request=req, failure_stage=e.stage, failure_detail=e.detail)

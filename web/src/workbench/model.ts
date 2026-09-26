@@ -140,6 +140,8 @@ export const UNLABELED_REASONS: Record<string, {noun: string; why: string}> = {
   unsupported_file: {noun: "属于不支持探测的文件", why: "测试/配置/文档等文件不做探测"},
   probe_timeout: {noun: "因探测超时未完成", why: "单次探测超时，证据不完整"},
   inert_withheld: {noun: "判为惰性的结论（不出证据）", why: "探测判为惰性，因此不出证据"},
+  inert_hollow: {noun: "所在单元含未执行行、不判惰性",
+    why: "删掉所在单元测试不变，但单元里有从未执行的行，惰性不成立"},
   collateral_breakage: {noun: "因测试收集或导入失败未执行",
     why: "测试在收集期就失败，不是行为约束"},
   environment_shift: {noun: "因跳过条件改变未执行", why: "跳过条件变化，与被测行为无关"},

@@ -551,7 +551,7 @@ describe("本轮修正", () => {
   it("未标注原因的每个枚举值都必须有中文说明，不裸露英文标识符", () => {
     const reasons = ["non_executable", "not_measured", "budget_exhausted",
       "no_valid_transform", "not_isolated", "flaky_or_dirty_restore",
-      "unsupported_file", "probe_timeout", "inert_withheld",
+      "unsupported_file", "probe_timeout", "inert_withheld", "inert_hollow",
       "collateral_breakage", "environment_shift"];
     for (const reason of reasons) {
       expect(reasonLabel(reason)).not.toBe("");

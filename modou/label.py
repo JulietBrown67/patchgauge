@@ -10,6 +10,10 @@
   而无据只是"没有测试执行到"。前者是做出来的证据，后者是缺席。
 - **无据 > 惰性**：一行从没被执行过，那么"删掉它所在的单元后测试没变化"
   对这一行什么都没说。此时给惰性是在暗示可删，不诚实。
+- **空心惰性不成立**：删掉一个单元测试不变，但单元里有从未执行过的行——
+  典型是只在 import 时执行了 def 行、函数体从没被测试调用的新增函数。
+  此时"删了没变化"只说明测试没碰过它，不说明测试碰过却不在乎它。
+  这类单元整个不给惰性，已执行/非执行行退回 未标注/inert_hollow（H3 护栏）。
 - **非执行行继承所在单元的结论**（方案 §3.1）：注释和空行本身无所谓执行不执行，
   但如果它所在的整个单元被删掉且有结论，这个结论覆盖它。
   没有继承到任何单元时，它是 未标注/non_executable。
@@ -43,13 +47,32 @@ def withhold_inert(results: list[LineResult]) -> list[LineResult]:
     return out
 
 
+def _hollow(initial: dict, path: str, span) -> bool:
+    """单元跨度内是否有从未执行过的可执行行。有，则惰性对整个单元不成立。"""
+    for ln in span:
+        r = initial.get((path, ln))
+        if r is not None and r.label is Label.UNEVIDENCED and r.executable:
+            return True
+    return False
+
+
 def merge(base: list[LineResult], units: list[EvidenceUnit],
           drift_files: set[str]) -> list[LineResult]:
     """base 是引擎 2 给出的初判；units 是引擎 1/3 产出的证据单元。"""
     by_key = {(r.path, r.lineno): r for r in base}
+    initial = dict(by_key)
 
     for u in units:
         if u.verdict is None:
+            continue
+        if u.verdict is Label.INERT and _hollow(initial, u.path, u.span):
+            for ln in u.span:
+                cur = by_key.get((u.path, ln))
+                if cur is not None and cur.label is Label.UNLABELED:
+                    by_key[(u.path, ln)] = LineResult(
+                        path=u.path, lineno=ln, label=Label.UNLABELED,
+                        reason=Unlabeled.INERT_HOLLOW, unit_id=u.unit_id,
+                        executable=cur.executable)
             continue
         for ln in u.span:
             key = (u.path, ln)

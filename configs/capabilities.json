@@ -51,24 +51,32 @@
     {
       "id": "inert_label",
       "title": "惰性结论",
-      "state": "disabled",
-      "runtime": "unavailable",
-      "summary": "该标签不进入公开版正式三态结论。",
-      "gate": "只有新的公开可复现实验和人工复核均通过后才可重新评估。",
-      "evidence": [],
+      "state": "experimental",
+      "runtime": "default",
+      "summary": "命令行 `python -m modou check` 默认呈现惰性：测试执行到了这段新增代码，但删除它后声明测试全部照样通过。含从未执行行的单元（例如只执行了 def 行的未测函数）退回 未标注/inert_hollow，不判惰性。本地工作台仍按三态呈现；`--three-state` 可恢复旧口径。",
+      "gate": "空心惰性护栏由公开回归测试覆盖；升级为已验证前还需要真实仓库上的人工复核。",
+      "evidence": [
+        "tests/test_cli.py"
+      ],
       "mentions": [
         "惰性结论",
-        "inert label"
+        "inert label",
+        "惰性（inert）"
       ],
       "disclosures": [
-        "已关闭",
-        "不进入",
-        "disabled"
+        "实验性",
+        "experimental",
+        "不证明可以安全删除",
+        "not proof"
       ],
       "forbidden": [
         {
-          "pattern": "惰性结论.{0,12}(已启用|正式上线)",
-          "why": "该能力在公开运行时不可用。"
+          "pattern": "惰性.{0,16}(可以|能够|可)(安全)?删除",
+          "why": "惰性只说明声明测试不约束这段代码，不说明它可以删除。"
+        },
+        {
+          "pattern": "惰性结论.{0,12}已验证",
+          "why": "惰性结论仍是实验性能力。"
         }
       ]
     },

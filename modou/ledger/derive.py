@@ -203,7 +203,19 @@ def derive(rows: list[dict], *, three_state: bool = True) -> list[DerivedLine]:
             continue
         if _identical(ix, exp) is not True:
             continue
-        for ln in range(a.get("line_start", 0), a.get("line_end", 0) + 1):
+        span = range(a.get("line_start", 0), a.get("line_end", 0) + 1)
+        if any((d := out.get((a["path"], ln))) is not None
+               and d.label is Label.UNEVIDENCED and d.executable for ln in span):
+            # 空心惰性：单元里有从未执行过的行（常见于只执行了 def 行的
+            # 未测函数），"删了没变化"说明不了测试在乎不在乎它。整个单元不给惰性，
+            # 与 label.merge 同一条规则。
+            for ln in span:
+                d = out.get((a["path"], ln))
+                if d is not None and d.label is Label.UNLABELED:
+                    d.reason = Unlabeled.INERT_HOLLOW
+                    d.evidence_ids = d.evidence_ids + (xid,)
+            continue
+        for ln in span:
             d = out.get((a["path"], ln))
             if d is None:
                 continue
