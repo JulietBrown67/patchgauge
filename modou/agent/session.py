@@ -21,12 +21,22 @@ from modou.adapters import declared_tests, map_test_ids, TestIdError
 from modou import ddmin as ddmin_mod
 from modou.engines import drift, hdd, unevidenced
 from modou.gitinfo import current_tool_commit
-from modou.models import EvidenceUnit, RunManifest, TestStatus, sha256_text
+from modou.models import (EvidenceUnit, RunManifest, TestStatus, Unlabeled,
+                          sha256_text)
 from modou.testrange import (collect_nodeids, JUnitUnusable, run_declared,
                              TestRangeError)
 from modou.workspace import prepare, WorkspaceError
 
 from .models import CandidateSummary, Observation, StopReason, ToolRisk
+
+#: 这四种未标注原因是"本轮没有完成对行的检查"的证据缺口，与
+#: modou.check.GAP_REASONS 同口径。存在任何一行带缺口原因时，
+#: analysis_completion 必须是 partial——锚点全部跑完不等于行全部查完，
+#: "complete + budget_exhausted 行"曾经在报告里同时出现，两者矛盾。
+ANALYSIS_GAP_REASONS = frozenset({
+    Unlabeled.BUDGET_EXHAUSTED, Unlabeled.NOT_MEASURED,
+    Unlabeled.PROBE_TIMEOUT, Unlabeled.ENVIRONMENT_SHIFT,
+})
 
 
 def probe_cost_units(*, new_file: bool, pending: int) -> int:
@@ -338,7 +348,10 @@ class AnalysisSession:
             rs = unevidenced.label_lines(path, lines, self.cov, supported=allowed)
             self.per_file[path] = rs
             self.base_lines += rs
-        self.bud = budget.Budget.start(self.base.seconds, started=self.t_start)
+        # total 必须绑 self.total_budget（用户审批的 --budget）：t_start 在
+        # 基线之前，所以这份预算覆盖"基线 + 探测"整个会话，而不是只管探测。
+        self.bud = budget.Budget.start(self.base.seconds, started=self.t_start,
+                                       total=self.total_budget)
         self.phase = SessionPhase.BASELINE_COMPLETE
         data = {"seconds": round(self.base.seconds, 2),
                 "declared_tests": len(self.nodeids),
@@ -643,7 +656,12 @@ class AnalysisSession:
         if self.three_state:
             results = label_mod.withhold_inert(results)
         summary = label_mod.summarize(results)
-        partial = len(self.completed) < len(self.universe)
+        # partial 的两个来源缺一不可：锚点没跑完（调度截断），或锚点跑完
+        # 但行上有证据缺口（hdd 在预算耗尽时把 pending 行标 BUDGET_EXHAUSTED
+        # 后锚点仍计入 completed——只比 completed/universe 会漏掉这种情况）。
+        partial = (len(self.completed) < len(self.universe)
+                   or any(r.reason in ANALYSIS_GAP_REASONS
+                          for r in results if r.reason is not None))
         summary["three_state"] = self.three_state
         summary["binary_files"] = diffstat.binary_files(self.ai_patch)
         summary["drift_rejected"] = self.drift_rejected

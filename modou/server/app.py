@@ -8,6 +8,7 @@ import secrets
 import socket
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -113,6 +114,165 @@ def announcement_urls(host: str, port: int) -> list[str]:
     return [f"http://{value}" for value in accepted_host_headers(host, port)]
 
 
+# ---- 历史元数据列表（U03：审查历史难回忆）--------------------------
+# 只读分页投影。每条审查最多解析 request.json、review_state.json（v2 缺
+# created_at 时再读事件日志首条小文件）；绝不读取源码快照、模型对话、
+# 完整证据包，也不把 request.json 原样外发——只透出下面白名单里的字段。
+
+HISTORY_SCHEMA_VERSION = "review-history-v1"
+HISTORY_DEFAULT_LIMIT = 20
+HISTORY_MAX_LIMIT = 50
+HISTORY_EXCERPT_CHARS = 160
+# ReviewSpec.DEFAULT_CREATED_AT 的占位值：不是真实创建时间，不能冒充。
+_HISTORY_EPOCH_CREATED_AT = "1970-01-01T00:00:00+00:00"
+
+
+def _history_timestamp(value) -> datetime | None:
+    """带时区且可解析的时间才可比；无时区或解析失败按“没有真实时间”处理。"""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _history_read_json(path: Path) -> dict:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _history_created_at(review_dir: Path, request: dict) -> str:
+    """真实创建时间，只从落盘证据取：优先 request.json 里 review_spec 的
+    created_at（v2）；其次事件日志首条（review.created）的 occurred_at。
+    都取不到就返回空字符串——绝不用当前时间或首次打开时间冒充。"""
+    spec = request.get("review_spec")
+    candidate = str((spec if isinstance(spec, dict) else {}).get("created_at") or "")
+    if (candidate and candidate != _HISTORY_EPOCH_CREATED_AT
+            and _history_timestamp(candidate) is not None):
+        return candidate
+    occurred = str(_history_read_json(
+        review_dir / "events" / "000001.json").get("occurred_at") or "")
+    return occurred if _history_timestamp(occurred) is not None else ""
+
+
+def _history_excerpt(value, limit: int = HISTORY_EXCERPT_CHARS) -> str:
+    return str(value or "").strip()[:limit]
+
+
+def _history_record(review_dir: Path) -> dict:
+    """单条审查的元数据投影；字段缺失返回空字符串，不猜测、不回填。"""
+    request = _history_read_json(review_dir / "request.json")
+    state = _history_read_json(review_dir / "review_state.json")
+    spec = request.get("review_spec")
+    spec = spec if isinstance(spec, dict) else {}
+    preset = request.get("preset")
+    preset = preset if isinstance(preset, dict) else {}
+    conditions = spec.get("success_conditions")
+    if not isinstance(conditions, list):
+        conditions = []
+    requirement = "；".join(
+        str(item) for item in conditions if str(item or "").strip())
+    return {
+        "review_id": review_dir.name,
+        "created_at": _history_created_at(review_dir, request),
+        # case/preset 信息只认 request.json 里真实写下的字段；旧记录没有
+        # 就是空字符串，前端按“未命名审查”诚实显示。
+        "case_name": _history_excerpt(
+            request.get("case_name") or preset.get("display_name"), 100),
+        "preset_id": _history_excerpt(
+            request.get("preset_id") or preset.get("preset_id"), 64),
+        "title": _history_excerpt(request.get("goal") or spec.get("goal")),
+        "requirement_excerpt": _history_excerpt(requirement),
+        "review_status": _history_excerpt(state.get("status"), 40),
+        "closure_status": "",
+        "task_id": "",
+    }
+
+
+def _history_closure_status(task: dict) -> str:
+    """任务回执状态，与 TaskService.receipt 的纯判定口径一致；算不出来
+    （结构缺失/为空）就返回空字符串，不编造。仓库快照复核不在历史列表
+    里重做——那是 /api/v2/tasks/{id}/receipt 的职责。"""
+    criteria = task.get("criteria")
+    if not isinstance(criteria, list) or not criteria:
+        return ""
+    statuses: set[str] = set()
+    for criterion in criteria:
+        outcome = criterion.get("outcome") if isinstance(criterion, dict) else None
+        status = str((outcome or {}).get("status") or "")
+        if not status:
+            return ""
+        statuses.add(status)
+    if statuses == {"supported"}:
+        return "supported"
+    if "gap_remains" in statuses:
+        return "gap_remains"
+    if statuses == {"accepted_risk"}:
+        return "accepted_risk"
+    if statuses <= {"pending", "pending_recheck"}:
+        return "pending"
+    return "inconclusive"
+
+
+def _history_closures_for_page(tasks_root: Path,
+                               review_ids: set[str]) -> dict[str, dict]:
+    """当前页审查 → 最新任务的 (task_id, 回执状态)。单遍扫描任务存储，
+    只为页内的 review_id 解析，页外任务不进结果。"""
+    latest: dict[str, dict] = {}
+    for path in sorted(tasks_root.glob("task-*.json")):
+        task = _history_read_json(path)
+        if not task:
+            continue
+        origin = str(task.get("origin_review_id") or "")
+        if origin not in review_ids:
+            continue
+        created = task.get("created_at")
+        created = float(created) if isinstance(created, (int, float)) else 0.0
+        known = latest.get(origin)
+        if known is None or created >= known["created_at"]:
+            latest[origin] = {"task_id": str(task.get("task_id") or path.stem),
+                              "status": _history_closure_status(task),
+                              "created_at": created}
+    return latest
+
+
+def _history_sort_key(record: dict):
+    """创建时间倒序；没有真实时间的旧记录排最后（次键稳定排序）。"""
+    moment = _history_timestamp(record["created_at"])
+    if moment is None:
+        return (1, 0.0, record["review_id"])
+    return (0, -moment.timestamp(), record["review_id"])
+
+
+def _review_history_page(manager: ReviewManager, tasks: TaskService, *,
+                         limit: int, offset: int) -> dict:
+    """历史审查元数据的一页。只读、分页，绝不触碰私有源码或模型对话。"""
+    limit = min(max(int(limit), 1), HISTORY_MAX_LIMIT)
+    offset = max(int(offset), 0)
+    records = [_history_record(d) for d in manager.root.iterdir()
+               if d.is_dir() and (d / "review_state.json").exists()]
+    records.sort(key=_history_sort_key)
+    total = len(records)
+    page = records[offset:offset + limit]
+    closures = _history_closures_for_page(
+        tasks.root, {record["review_id"] for record in page})
+    for record in page:
+        closure = closures.get(record["review_id"]) or {}
+        record["closure_status"] = str(closure.get("status") or "")
+        record["task_id"] = str(closure.get("task_id") or "")
+    return {"schema_version": HISTORY_SCHEMA_VERSION, "reviews": page,
+            "total": total, "limit": limit, "offset": offset,
+            "boundary": ("只返回历史元数据：不含私有源码内容、模型对话或证据包。"
+                         "created_at 取自落盘证据（review_spec.created_at 或事件"
+                         "日志首条），缺失即为空字符串，不以首次打开时间冒充。")}
+
+
 def _is_event_stream_path(path: str) -> bool:
     return path.endswith("/events")
 
@@ -154,7 +314,7 @@ def create_app(*, manager: ReviewManager, token: str,
         if not task_id:
             raise IntakeError("TRIGGER_TASK_REQUIRED",
                               "trigger job requires the server-side task_id field")
-        # 取消与预算探针传入真实复验循环，触发作业与
+        # R2（08430cc 复核）：取消与预算探针传入真实复验循环，触发作业与
         # 委托作业同一纪律——中断后不再启动后续实验，不把中止当成功。
         def _interrupt_check():
             if ctx.cancel_event is not None and ctx.cancel_event.is_set():
@@ -469,6 +629,14 @@ def create_app(*, manager: ReviewManager, token: str,
                               "locate request must be an object")
         return manager.locate_code(raw)
 
+    # U03：受同一启动令牌保护的历史元数据列表。注意必须注册在
+    # /api/v2/reviews/{review_id} 之前，否则 "history" 会被路径参数吃掉。
+    @app.get("/api/v2/reviews/history")
+    async def review_history_v2(limit: int = HISTORY_DEFAULT_LIMIT,
+                                offset: int = 0):
+        return await run_in_threadpool(
+            _review_history_page, manager, tasks, limit=limit, offset=offset)
+
     @app.get("/api/v2/reviews/{review_id}")
     async def get_review_v2(review_id: str):
         return manager.describe(review_id)
@@ -603,6 +771,18 @@ def create_app(*, manager: ReviewManager, token: str,
             raise IntakeError("DELEGATION_REQUEST_INVALID", "task_id is required")
         return await run_in_threadpool(delegations.check, task_id,
                                        str(raw.get("reason") or "user_check"))
+
+    # ---- 个人实用化 B 计划第一期：对话式入口（编排层，结论只来自回执）--
+    from modou.server.chat import ChatError, ChatService, register_chat_routes
+
+    chat_service = ChatService(manager)
+
+    @app.exception_handler(ChatError)
+    async def chat_error(_request: Request, exc: ChatError):
+        status = 404 if exc.code.startswith("CONVERSATION_") else 400
+        return _error(status, exc.code, exc.message)
+
+    register_chat_routes(app, chat_service)
 
     # ---- T07: registered projects (server-side run configs; the web client
     # only selects a configuration, it never submits free-form commands).

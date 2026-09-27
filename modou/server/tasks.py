@@ -74,7 +74,7 @@ def rows_for(rt):
 
 
 class ReverifyInterrupted(Exception):
-    """复验被取消/预算终止打断。
+    """复验被取消/预算终止打断（R2，08430cc 复核）。
 
     部分状态（新轮次、已复验项）已在任务账本落盘后才抛出；作业体据此把
     作业落成取消/预算终止，且不得把本次结果当作成功回执呈现。
@@ -313,6 +313,9 @@ class TaskService:
                 observed_snapshot = _repo_snapshot(self._repo(task).path)
             except IntakeError:
                 observed_snapshot = {}
+            needs_gate = any(c.get("disposition") == "add_tests" or c["status"] == "selected"
+                             for c in task["criteria"])
+            propose_gate = self._propose_gate(task) if needs_gate else None
             for criterion in task["criteria"]:
                 expected = criterion.get("adopted_snapshot") or criterion.get("experiment_snapshot") or task["source_snapshot"]
                 criterion["source_snapshot_matches"] = bool(observed_snapshot) and observed_snapshot == expected
@@ -337,6 +340,13 @@ class TaskService:
                     criterion["outcome"] = {"status": "inconclusive",
                         "reason": "代码版本已变化；历史证据保留，当前版本需要重新审查"}
                 criterion["allowed_actions"] = self._allowed(criterion)
+                capabilities = self._capabilities(criterion, propose_gate)
+                criterion["action_capabilities"] = capabilities
+                # allowed_actions 是老客户端的兼容口径，必须与真实守卫一致：
+                # 能力投影确认 propose_test 被授权闸关闭时，不再把它列为可执行。
+                if not capabilities.get("propose_test", {"enabled": True})["enabled"]:
+                    criterion["allowed_actions"] = [a for a in criterion["allowed_actions"]
+                                                     if a != "propose_test"]
                 if criterion.get("adoption_mode") != "preauthorized":
                     criterion["allowed_actions"] = [a for a in criterion["allowed_actions"]
                                                      if a != "auto_confirm_adoption"]
@@ -683,6 +693,81 @@ class TaskService:
         if c["status"] == "adopted":
             return ["retry_review"]
         return []
+
+    # ---- U10：动作能力只读投影 ------------------------------------------
+    # allowed_actions 只回答状态机问题（“这个状态允许什么动作”）。真正执行
+    # propose_test 还要过 ControlManager.propose_test 的授权闸：模型配置、
+    # 产品模式、终态与证据包、冻结授权、数据范围、源码快照。这里把同一组
+    # 前置条件投影成前端可展示的“能否执行＋阻塞原因＋恢复方式”；执行前
+    # 的真实校验仍在 control.propose_test 原地重做一遍，两处必须同步维护。
+    # 语义备注：当前生成补测候选的授权闸是 allow_repair_branch＋
+    # selected_snippets 数据许可；allow_generated_tests 字段只被记录、尚未
+    # 单独参与闸门——不在这里隐式扩权或改口径。
+    def _capabilities(self, criterion, propose_gate):
+        capabilities = {name: {"enabled": True, "code": None,
+                               "reason": None, "recovery": "none"}
+                        for name in self._allowed(criterion)}
+        if "propose_test" in capabilities or criterion.get("disposition") == "add_tests":
+            capabilities["propose_test"] = (self._snapshot_block(criterion)
+                                            or propose_gate
+                                            or {"enabled": True, "code": None,
+                                                "reason": None, "recovery": "none"})
+        return capabilities
+
+    @staticmethod
+    def _snapshot_block(criterion):
+        if criterion.get("source_snapshot_matches") is False:
+            return {"enabled": False, "code": "SOURCE_SNAPSHOT_CHANGED",
+                    "reason": "源码在审查后已变化，原证据不能用于当前版本；请基于"
+                              "当前版本创建新审查。", "recovery": "configure_new_review"}
+        return None
+
+    def _propose_gate(self, task):
+        """Review-level preconditions shared by every criterion (U10).
+
+        与 ControlManager.propose_test 的授权闸同源；返回 None 表示审查级
+        前置全部满足。执行前的真实校验仍在原地重做，防状态变化。
+        """
+        try:
+            if self.manager.provider is None:
+                return {"enabled": False, "code": "MODEL_PROVIDER_UNAVAILABLE",
+                        "reason": "模型服务尚未配置或暂不可用，不能生成补测候选。",
+                        "recovery": "refresh"}
+            rt = self.manager._runtime(task["origin_review_id"])
+            request = rt.request or _read_json(rt.review_dir / "request.json")
+            if str(request.get("product_mode") or "standard") == "standard":
+                return {"enabled": False, "code": "STANDARD_MODE_MODEL_FORBIDDEN",
+                        "reason": "本次是标准审查，承诺零模型调用；生成补测候选需要"
+                                  "创建带模型授权的智能体审查。",
+                        "recovery": "configure_new_review"}
+            status = rt.state.snapshot.status.value
+            if status not in {"COMPLETE", "PARTIAL"}:
+                return {"enabled": False, "code": "REPAIR_REVIEW_NOT_COMPLETE",
+                        "reason": "原审查尚未完成，不能基于未定稿的证据提议补测。",
+                        "recovery": "refresh"}
+            if not rt.state.snapshot.valid_bundle:
+                return {"enabled": False, "code": "REPAIR_EVIDENCE_INVALID",
+                        "reason": "原审查的证据包未通过完整性校验，不能作为补测依据。",
+                        "recovery": "refresh"}
+            spec = self.manager._review_spec(rt)
+            if spec is None or not spec.autonomy_policy.allow_repair_branch:
+                return {"enabled": False, "code": "REPAIR_NOT_AUTHORIZED",
+                        "reason": "本次审查创建时未授权生成补测候选（冻结授权不含补测"
+                                  "权限）。当前任务、已选发现与证据保持不变；要生成补测，"
+                                  "需要创建一次带该授权的新审查。",
+                        "recovery": "configure_new_review"}
+            if "selected_snippets" not in spec.data_policy.model_data_categories:
+                return {"enabled": False, "code": "REPAIR_DATA_NOT_AUTHORIZED",
+                        "reason": "本次授权未允许把所选代码片段发送给模型，因此不能生成"
+                                  "补测候选；需要创建一次包含该数据范围的新审查。",
+                        "recovery": "configure_new_review"}
+            return None
+        except Exception:
+            # 只读投影失败时选择保守关闭：宁可让用户重读状态，也不渲染
+            # 一个点击即失败的“可执行”按钮。
+            return {"enabled": False, "code": "CAPABILITY_UNAVAILABLE",
+                    "reason": "暂时无法确认补测授权，请重新读取处置状态后再试。",
+                    "recovery": "refresh"}
 
     def action(self, task_id, raw, idempotency_key=""):
         try:

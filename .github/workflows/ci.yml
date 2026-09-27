@@ -42,3 +42,32 @@ jobs:
         working-directory: web
       - run: npm run test:e2e
         working-directory: web
+
+  # M2 的交付门禁独立成 job，**不挂在 verify-public-package 后面**。
+  # 那条 job 第一步就跑 tools/public_release_check.py，而它当前因 9/7 发布
+  # 换轨遗留的孤儿公开线结构债是红的（docs/赛后清单.md 有记）。把新门禁叠在
+  # 一条已红的链路后面，将来分不清是新红还是旧红。
+  verify-delivery-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-agent.in
+      - run: pip install -r requirements-agent.in
+      - name: Identify the runner to git
+        # 演练要在临时仓库里真提交一次，runner 默认没有 user.name/email。
+        run: |
+          git config --global user.name "ci"
+          git config --global user.email "ci@example.invalid"
+      - name: Drill the five-fingerprint delivery gate
+        # 造一个真交付包 → 断网 + provider 哨兵下跑门禁 CLI（须放行）
+        # → 改掉包里一个字节再跑一遍（须失败关闭）。两端都成立才退出 0。
+        run: python tools/ci_delivery_gate_drill.py --output delivery-gate-drill.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: delivery-gate-drill
+          path: delivery-gate-drill.json

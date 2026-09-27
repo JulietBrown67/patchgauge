@@ -5,7 +5,7 @@ Verify whether newly added code is genuinely constrained by tests through revers
 
 <p align="center">
   <a href="https://github.com/kuaikuaijisuanjishu-svg/modou-agent/actions/workflows/ci.yml"><img src="https://github.com/kuaikuaijisuanjishu-svg/modou-agent/actions/workflows/ci.yml/badge.svg?branch=main" alt="Public CI"></a>
-  <a href="https://github.com/kuaikuaijisuanjishu-svg/modou-agent/releases/tag/v0.2.0-experimental.1"><img src="https://img.shields.io/badge/preview-v0.2.0--experimental.1-blue" alt="v0.2 experimental preview"></a>
+  <a href="https://github.com/kuaikuaijisuanjishu-svg/modou-agent/releases/tag/v0.2.0-experimental.2"><img src="https://img.shields.io/badge/preview-v0.2.0--experimental.2-blue" alt="v0.2 experimental preview"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-6C5CE7" alt="Apache-2.0 license"></a>
   <a href="#quickstart"><img src="https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white" alt="Python 3.12: public CI runtime"></a>
   <a href="#quickstart"><img src="https://img.shields.io/badge/Node.js-22-339933?logo=nodedotjs&logoColor=white" alt="Node.js 22: public CI runtime"></a>
@@ -17,7 +17,7 @@ Verify whether newly added code is genuinely constrained by tests through revers
 
 **水木验码是面向 AI 编程的本地测试证据验证工具。** AI 写出的补丁即使测试全绿，也不代表每一行新增代码都被测试真正约束。水木验码在隔离工作区中临时移除候选新增代码，重新运行声明范围内的测试，观察具体哪条测试发生变化，再校验工作区恢复，留下可回放的证据。
 
-当前公开版本：**v0.2 实验预览版**（`v0.2.0-experimental.1`）。在可信项目和可恢复的工作副本中试用；测试通过、实验支持与功能完全正确不是同一件事。
+当前公开版本：**v0.2 实验预览版**（`v0.2.0-experimental.2`）。本标签新增单命令只读检查 `shuimu check`、`pip install .` 直接安装与一批引擎正确性修复（时间预算约束、报告完成度、沙箱随包分发）。仍属实验 opt-in：在可信项目和可恢复的工作副本中试用；测试通过、实验支持与功能完全正确不是同一件事。
 
 “水木”取自“水木清华”的文化意象，“验码”对应对代码和测试证据的验证。本项目是独立作品，不代表任何高校的官方产品或官方背书。
 
@@ -46,6 +46,7 @@ Verify whether newly added code is genuinely constrained by tests through revers
 
 | 能力 | 使用方式与价值 |
 | --- | --- |
+| 单命令检查 | `shuimu check` 对当前改动做一次反事实检查，终端确认后输出三态结论与可回放报告；可选绑定计划要素的只读预授权 |
 | 审查当前改动 | 围绕验收要求查看改动及相关测试依据，区分有支持、缺少依据和暂时无法判断 |
 | 查看与导出证据 | 在本地工作台阅读逐行结果、实验记录和对应版本的回执 |
 | 处置测试缺口 | 准备或接收补测候选，在隔离环境验证，再由用户确认是否采用 |
@@ -81,6 +82,14 @@ python -m modou.server \
 
 打开终端打印的完整本地地址。服务只监听本机回环地址，并使用启动令牌；不要分享含令牌的链接。
 
+**单命令检查（experimental.2 新增）**：在同一虚拟环境中 `python -m pip install .`，然后在你自己的 Python/pytest 仓库里（有未提交改动时）运行：
+
+```bash
+shuimu check          # 展示计划摘要并请求一次终端确认
+```
+
+结论与退出码口径见 `shuimu --help` 与 [CHANGELOG](CHANGELOG.md)；检查不写回你的工作树与暂存区。
+
 **第一次使用：** 选择项目与验收要求 → 确认计划 → 阅读结果 → 验证补测候选 → 确认采用 → 对新版本复验。例如：“同一学号重复报名，不能增加第二条记录或重复扣除名额。”一次检查只回答这次声明的范围。
 
 <a id="downloads"></a>
@@ -92,7 +101,7 @@ python -m modou.server \
 
 - **macOS**：[安装说明](docs/install-mac.md)，解压后双击 `安装水木验码.command`，安装完成再双击 `启动水木验码.command`。
 - **Windows + WSL2**：[安装说明](docs/install-windows.md)。后端运行在 WSL2 Linux 中；当前仍是待目标机器验证的预览包。
-- **版本与校验**：[本次预览 Release](https://github.com/kuaikuaijisuanjishu-svg/modou-agent/releases/tag/v0.2.0-experimental.1)。GitHub 的 `releases/latest` 仍指向 v0.1.1，请使用这里的明确版本入口。
+- **版本与校验**：预览安装包仍是 `v0.2.0-experimental.1` 构建（源码 ecb17036）；`v0.2.0-experimental.2` 以源码与 `pip install .` 方式提供，见[本次 Release](https://github.com/kuaikuaijisuanjishu-svg/modou-agent/releases/tag/v0.2.0-experimental.2)。GitHub 的 `releases/latest` 仍指向 v0.1.1，请使用明确版本入口。
 
 <details>
 <summary>安装包 SHA-256（2026-09-18 上传，源码 ecb17036）</summary>
@@ -191,7 +200,7 @@ Linux 首次运行浏览器检查可能还需执行 `npx playwright install --wi
 
 **Shuimu Yanma** is a local evidence-based code review tool. Passing tests do not necessarily mean every added line is constrained by those tests. It temporarily removes candidate additions in an isolated workspace, reruns the declared tests, records which named tests change, and checks workspace restoration. The result is a scoped finding with replayable evidence.
 
-Current public version: **v0.2 experimental preview** (`v0.2.0-experimental.1`). Use trusted projects and recoverable working copies. This independent project has no institutional endorsement.
+Current public version: **v0.2 experimental preview** (`v0.2.0-experimental.2`). New in this tag: a single-command read-only check (`shuimu check`), direct `pip install .` packaging, and engine correctness fixes (budget enforcement, honest completion reporting, sandbox shipped in-package). Still experimental opt-in: use trusted projects and recoverable working copies. This independent project has no institutional endorsement.
 
 ### How it works
 
@@ -216,7 +225,7 @@ Local Git repository + declared test scope
 
 ### What is new in v0.2?
 
-Review changes against acceptance requirements, inspect and export version-specific evidence, validate candidate tests before user adoption, and recheck after code changes. Bounded delegations organize further checks through explicit events within the approved time, count and budget. CLI, MCP and VS Code share the same local backend and receipts.
+`shuimu check` runs one reversible-experiment review of your current diff with a single command (terminal confirmation, optional read-only pre-authorization). Review changes against acceptance requirements, inspect and export version-specific evidence, validate candidate tests before user adoption, and recheck after code changes. Bounded delegations organize further checks through explicit events within the approved time, count and budget. CLI, MCP and VS Code share the same local backend and receipts.
 
 ### Quick start
 

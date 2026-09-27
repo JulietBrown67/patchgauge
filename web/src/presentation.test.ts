@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   classifyError, decisiveEvidenceId, eventLabel, linePresentation, normalizePastedToken,
   reasonLabel, resolveStartupToken, schedulingDetail, statusView, summarySentence,
-  eventPhase, experimentStory, groupEventPhases, verdictCounts, minimizationViews,
+  eventPhase, experimentStory, traceableStory, groupEventPhases, verdictCounts, minimizationViews,
+  dataCategoryLabels, snippetsAuthorized,
+  historyGroups, historyEntryTitle, filterHistoryEntries, REVIEW_STATUS_LABELS,
   modeLabels, capabilityAvailable, capabilityTone, groupCapabilities, emphasizeNumbers,
   offlineReplayNotice,
   modelConclusion, modelDecisionStages, modelParticipation, workspacePresentation,
@@ -14,7 +16,7 @@ import {
   eventPresentation,
   uiProbeStatusView, narrowPackageChecksView, unenforcedLimitsView,
   certificateGradeRows,
-  memoryRuleViews, MEMORY_CARD_HEADLINE, MEMORY_STATUS_LABELS, memoryKindOptions,
+  memoryRuleViews, MEMORY_STATUS_LABELS, memoryKindOptions, memoryHeadline, memoryKindHelp,
   dispositionOptions, DISPOSITION_ANSWERS, DISPOSITION_BOUNDARY,
   planRevisionViews, PLAN_REVISION_BOUNDARY,
   admissibilityView, admissibilityContrast, visaStatusView,
@@ -166,7 +168,9 @@ describe("Review Cockpit presentation", () => {
       {kind: "probe.completed", data: {anchor_id: "pkg/a.py",
         regressed_tests: ["tests/test_a.py::test_required"]}},
       {kind: "restore.verified", data: {anchor_id: "pkg/a.py", restored_clean: true}},
-    ], [{位置: {file: "pkg/a.py", start: 9, end: 11}}]);
+    ], [{状态: "承重", 逐条定级: [{test_id: "tests/test_a.py::test_required",
+      before: "passed", after: "failed"}], 回滚干净: true,
+      位置: {file: "pkg/a.py", start: 9, end: 11}}]);
     expect(story.map(step => step.detail)).toEqual([
       "12/12 项测试通过", "pkg/a.py:9–11 · 3 行", "tests/test_a.py::test_required",
       "12/12 项测试通过，工作区已恢复",
@@ -184,6 +188,82 @@ describe("Review Cockpit presentation", () => {
       {kind: "restore.started", data: {anchor_id: "pkg/a.py"}},
     ]);
     expect(story.map(step => step.state)).toEqual(["active", "active", "pending", "active"]);
+  });
+
+  // N01 复现用的最小去敏 fixture：来自真实成绩单案例的同文件两个单元。
+  // 11–12 行单元惰性（移除后 4 项测试状态逐项相同）；43 行单元承重
+  // （grade_label 测试 passed → failed）。文件级 probe/observation 事件
+  // 是两个单元共用的聚合事件——regressed_tests 是全文件并集。
+  const gradebookEvents = [
+    {kind: "baseline.completed", event_id: "e-base",
+      data: {declared_tests: 4, all_passed: true}},
+    {kind: "probe.completed", event_id: "e-probe",
+      data: {anchor_id: "gradebook/stats.py", units: 8, status: "COMPLETE",
+        regressed_tests: ["tests/test_grade_label.py::test_grade_label_maps_each_band",
+          "tests/test_grade_label.py::test_grade_label_marks_a_failing_score"]}},
+    {kind: "observation.recorded", event_id: "e-obs",
+      data: {anchor_id: "gradebook/stats.py",
+        regressed_tests: ["tests/test_grade_label.py::test_grade_label_maps_each_band"]}},
+    {kind: "restore.verified", event_id: "e-restore",
+      data: {anchor_id: "gradebook/stats.py", restored_clean: true}},
+  ];
+  const inertCert = {unit_id: "bfd861806910", 状态: "惰性", 逐条定级: [],
+    回滚干净: null, 位置: {file: "gradebook/stats.py", start: 11, end: 12}};
+  const loadBearingCert = {unit_id: "92075aad84b8", 状态: "承重",
+    逐条定级: [{test_id: "tests/test_grade_label.py::test_grade_label_maps_each_band",
+      before: "passed", after: "failed"}],
+    回滚干净: true, 位置: {file: "gradebook/stats.py", start: 43, end: 43}};
+
+  it("默认故事锁定承重单元：位置、报警、恢复同属一个实验（N01）", () => {
+    const story = traceableStory(gradebookEvents, [inertCert, loadBearingCert]);
+    expect(story.unitId).toBe("92075aad84b8");
+    expect(story.location).toEqual({file: "gradebook/stats.py", start: 43, end: 43});
+    const remove = story.steps.find(step => step.key === "remove")!;
+    const regression = story.steps.find(step => step.key === "regression")!;
+    const restore = story.steps.find(step => step.key === "restore")!;
+    // 位置必须是 43，不是同文件第一张证书的 11–12。
+    expect(remove.detail).toContain("gradebook/stats.py:43");
+    expect(remove.detail).not.toContain("11–12");
+    // 报警来自该单元证书的逐条定级；点击跳转关联同一实验的观测事件。
+    expect(regression.detail).toBe("tests/test_grade_label.py::test_grade_label_maps_each_band");
+    expect(regression.state).toBe("failed");
+    expect(regression.eventId).toBe("e-obs");
+    expect(restore.state).toBe("complete");
+    expect(restore.eventId).toBe("e-restore");
+  });
+
+  it("选择惰性单元时不得显示别的单元的报警（N01）", () => {
+    const story = traceableStory(gradebookEvents, [inertCert, loadBearingCert],
+      {unitId: "bfd861806910"});
+    expect(story.unitId).toBe("bfd861806910");
+    const remove = story.steps.find(step => step.key === "remove")!;
+    const regression = story.steps.find(step => step.key === "regression")!;
+    expect(remove.detail).toContain("gradebook/stats.py:11–12");
+    expect(regression.detail).toBe("未观察到具名测试失败");
+    expect(regression.state).not.toBe("failed");
+    // 文件级事件里的报警属于其他单元，不得作为该单元故事的跳转入口。
+    expect(regression.eventId).toBeNull();
+  });
+
+  it("同文件两个实验单元必须可区分（N01）", () => {
+    const byInert = traceableStory(gradebookEvents, [inertCert, loadBearingCert],
+      {unitId: "bfd861806910"});
+    const byLoad = traceableStory(gradebookEvents, [inertCert, loadBearingCert],
+      {unitId: "92075aad84b8"});
+    expect(byInert.unitId).not.toBe(byLoad.unitId);
+    expect(byInert.location?.start).toBe(11);
+    expect(byLoad.location?.start).toBe(43);
+  });
+
+  it("证书缺少恢复记录时保持待定，不从其他实验补齐（N01）", () => {
+    const story = traceableStory([
+      {kind: "baseline.completed", data: {declared_tests: 4, all_passed: true}},
+      {kind: "probe.completed", data: {anchor_id: "gradebook/stats.py",
+        regressed_tests: ["tests/test_grade_label.py::test_grade_label_maps_each_band"]}},
+    ], [{...inertCert, 回滚干净: null}], {unitId: "bfd861806910"});
+    const restore = story.steps.find(step => step.key === "restore")!;
+    expect(restore.state).toBe("pending");
+    expect(restore.detail).toContain("未记录恢复校验");
   });
 
   it("folds raw events into four stable review phases without losing failures", () => {
@@ -657,6 +737,22 @@ describe("恢复失败", () => {
   });
 });
 
+describe("N09 数据范围文案统一口径", () => {
+  it("授权类别显示为中文标签；缺失或未知类别如实透出", () => {
+    expect(dataCategoryLabels(["metadata", "diff_summary", "test_facts"]))
+      .toBe("结构化元数据 · 变更摘要（文件与行号） · 测试事实");
+    expect(dataCategoryLabels(["metadata", "diff_summary", "test_facts", "selected_snippets"]))
+      .toContain("所选代码片段文本");
+    expect(dataCategoryLabels(undefined)).toBe("最小结构化事实");
+    expect(dataCategoryLabels(["future_category"])).toBe("future_category");
+  });
+  it("代码片段是否已授权由同一份类别列表判定", () => {
+    expect(snippetsAuthorized(["metadata", "test_facts"])).toBe(false);
+    expect(snippetsAuthorized(["metadata", "selected_snippets"])).toBe(true);
+    expect(snippetsAuthorized(undefined)).toBe(false);
+  });
+});
+
 describe("能力状态", () => {
   const registry: Capability[] = [
     {id: "counterfactual_probe", title: "反事实实验", state: "verified",
@@ -755,10 +851,28 @@ describe("能力状态", () => {
     ]);
     expect(memoryRuleViews(null)).toEqual([]);
     expect(memoryRuleViews("junk")).toEqual([]);
-    expect(MEMORY_CARD_HEADLINE).toBe("上次你确认的规则，这次已生效");
+    expect(MEMORY_STATUS_LABELS.revoked).toBe("已撤销");
     expect(memoryKindOptions().map(option => option.value)).toEqual(
       ["review_preference", "known_baseline", "test_convention", "architecture_constraint"]);
-    expect(MEMORY_STATUS_LABELS.revoked).toBe("已撤销");
+  });
+
+  it("N04：规则卡标题反映真实规则状态，不再无条件宣称已生效", () => {
+    expect(memoryHeadline({activeCount: 0, savedThisSession: false})).toBe("尚未保存审查规则");
+    expect(memoryHeadline({activeCount: 3, savedThisSession: false}))
+      .toBe("上次你确认的 3 条规则，本次审查已生效");
+    // 本会话保存的规则供下次审查使用，不得倒写成本轮已生效。
+    expect(memoryHeadline({activeCount: 0, savedThisSession: true})).toBe("已保存，供下次审查使用");
+    expect(memoryHeadline({activeCount: 2, savedThisSession: true})).toBe("已保存，供下次审查使用");
+  });
+
+  it("U04：四种规则类型各有一句解释与示例", () => {
+    for (const value of ["review_preference", "known_baseline",
+                         "test_convention", "architecture_constraint"]) {
+      const help = memoryKindHelp(value);
+      expect(help.hint.length).toBeGreaterThan(6);
+      expect(help.example).toContain("。");
+    }
+    expect(memoryKindHelp("unknown_kind")).toEqual({hint: "", example: ""});
   });
 
   it("review_memory.loaded 事件有中文标签与条数小字", () => {
@@ -1251,5 +1365,34 @@ describe("历史回执的版本有效性", () => {
     expect(normalizeEvalReceipt(raw)?.verdict).toContain("当前版本待复验");
     expect(normalizeEvalReceiptIndex({receipts: [raw]})[0].verdict).toContain("当前版本待复验");
     expect(raw.verdict).toBe("PASS");
+  });
+});
+
+describe("U03 审查历史分组与搜索", () => {
+  const now = new Date();
+  const iso = (offsetHours: number) =>
+    new Date(now.getTime() - offsetHours * 3600_000).toISOString();
+  const entries = [
+    {review_id: "r-new", created_at: now.toISOString(), title: "成绩单绩点换算",
+      requirement_excerpt: "不及格课程测试依据", review_status: "COMPLETE"},
+    {review_id: "r-old", created_at: iso(30), case_name: "抢课脚本",
+      requirement_excerpt: "", review_status: "PARTIAL"},
+    {review_id: "r-ancient", created_at: null, title: "", review_status: ""},
+  ];
+  it("按本地日期倒序分组；时间未知的旧记录不冒充创建时间", () => {
+    const groups = historyGroups(entries);
+    expect(groups[0].label).toBe("今天");
+    expect(groups[0].entries[0].review_id).toBe("r-new");
+    expect(groups[groups.length - 1].label).toBe("时间未知");
+    expect(groups[groups.length - 1].entries[0].review_id).toBe("r-ancient");
+  });
+  it("标题与摘要可搜索；空查询返回全部", () => {
+    expect(filterHistoryEntries(entries, "绩点").map(e => e.review_id)).toEqual(["r-new"]);
+    expect(filterHistoryEntries(entries, "不及格").map(e => e.review_id)).toEqual(["r-new"]);
+    expect(filterHistoryEntries(entries, "").length).toBe(3);
+  });
+  it("缺标题的记录诚实显示未命名；状态用中文标签", () => {
+    expect(historyEntryTitle(entries[2])).toBe("未命名审查");
+    expect(REVIEW_STATUS_LABELS.COMPLETE).toBe("审查完成");
   });
 });

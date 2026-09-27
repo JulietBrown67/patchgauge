@@ -2,19 +2,29 @@
 
 All notable public changes are documented here. This log covers only the sanitized public showcase and intentionally excludes private research history.
 
+## [0.2.0-experimental.2] - 2026-09-27
+
+Opt-in experimental prerelease. Not stable, not generally available, not production-ready. Ships on the same disclosed-degradation basis as experimental.1: no third-party compatibility claim, no human-factors claim, and the stable-promotion gates (independent hidden QA, independent Linux host, authorized private pilot, real-developer study, manual security sign-off) remain open.
+
+### Added
+
+- Single-command read-only check (`shuimu check`): runs counterfactual removal experiments over the current diff against HEAD, prints load-bearing / unevidenced / orphaned findings with per-line reasons, archives a report plus machine-readable result (including a path back to the report), and exits with mutually exclusive codes. Terminal confirmation by default; optional read-only pre-authorization bound to repository, interpreter, test scope, budget and validity (revocable, fails closed on plan mismatch).
+- Direct installation: root `pyproject.toml` provides the `shuimu` entry point (`python -m pip install .`).
+- Trend view (`shuimu --trend`) over the local check history, always showing labeled denominators and unlabeled counts together.
+- Local workbench conversation entry (experimental): shares the same engine and receipts as the six-step flow.
+
+### Fixed
+
+- Time budget now constrains the whole session (baseline plus probing). Previously the user-approved budget only bounded the baseline while probing used an internal 300-second default.
+- Report completion is honest: any line left with a gap reason (budget exhausted, probe timeout, not measured, environment shift) marks the analysis partial; "complete" no longer coexists with gap rows.
+- The macOS Seatbelt sandbox implementation ships inside the package, so installed copies can use sandboxed execution instead of failing with a missing module.
+- Release-notes recheck command now quotes arguments (`shlex.join`), so repository paths containing spaces survive copy-paste; `--json` output stays a single JSON document even when `--open` is passed.
+
+### Not established by this release
+
+- Same as experimental.1: no fixed six-repository compatibility sample, no executed UI-comprehension batch, no independent hidden QA / Linux host / private pilot / real-developer study / manual security sign-off. The single-command check and conversation entry have no human-user study behind them and remain experimental opt-in.
+
 ## [Unreleased]
-
-### Documentation maintenance — 2026-09-18
-
-- Restore the bilingual product introduction, reversible-experiment explanation, language and license badges, navigation, and copyable quick-start commands.
-- Remove the personal author and college attribution from the README while retaining license notices.
-- Link directly to the v0.2 preview and platform assets, publish their SHA-256 values, and correct the Windows archive filename in the installation guide.
-- Describe the language adapters by actual validation scope and preserve the distinction between candidate validation, adoption and revalidation.
-
-### Release maintenance — 2026-09-18
-
-- The public product snapshot and platform assets were refreshed under the existing `v0.2.0-experimental.1` release on September 18 (source `ecb17036`); the original September 8 notes below describe the earlier snapshot.
-- The reused tag triggered release verification with obsolete September 8 commit and digest variables. Maintenance reconciles the release metadata with the September 18 snapshot; future releases must use a new tag rather than replacing a published tag.
 
 ### Changed
 

@@ -1511,11 +1511,13 @@ footer p strong { color: var(--text-soft); font-weight: 600; }
   .header-controls { align-items: stretch; }
   .view-switch button { padding: 13px 14px; min-height: 44px; }
   .implementation-mark { display: none; }
-  /* 三枚运行事实在窄屏不再整行消失；基础规则本来就是 flex + wrap，窄屏只需左对齐。 */
+  /* #29 复核：三枚运行事实（本次是回放、真实跑还是演示）不再整行消失。
+     基础规则本来就是 flex + wrap，窄屏只需左对齐。 */
   /* F4 合并后 mode-strip 不再是 flex 行，窄屏改为整排事实左对齐。 */
   .run-facts { justify-content: flex-start; }
   .hero, .hero.compact { grid-template-columns: 1fr; min-height: auto; gap: 14px; padding: 20px 0; }
-  /* 窄屏有结果时收起首屏引导段，产品名与标题仍在页头；900px 以上照常显示。 */
+  /* #29 复核后保留这里：收起的是 61 字的首屏引导段，窄屏有结果时它只跟结论抢位置；
+     产品名与标题仍在页头，同一段在 900px 以上照常显示。 */
   .hero.compact .hero-copy { display: none; }
   .hero-aside { grid-template-columns: 1fr; }
   .hero-mark { width: 84px; height: 84px; }
@@ -1550,14 +1552,15 @@ footer p strong { color: var(--text-soft); font-weight: 600; }
   .repair-record { grid-template-columns: 1fr; }
   .diff-line { grid-template-columns: 116px 1fr; }
   .diff-line > .line-code { grid-column: 1 / 3; border-left: 0; border-top: 1px solid var(--line-soft); }
-  /* 逐行理由是结论本身；窄屏占满整行、允许换行，不再省略号裁切。 */
+  /* #29 复核：逐行理由是结论本身（哪条测试、哪条证据），窄屏不许整行消失。
+     改成占满整行、允许换行，不再省略号裁切。 */
   .diff-line > small { grid-column: 1 / 3; padding: 6px 10px 0;
     white-space: normal; overflow: visible; text-overflow: clip; }
   /* 游离带的 `5.5rem 1fr auto auto` 在窄屏会把后两列挤成竖排单字并被裁掉，
      连文件名都看不见。窄屏改为两行堆叠：标签＋文件名，然后是文件级说明。 */
   .diff-file-band { grid-template-columns: 5.5rem 1fr; row-gap: .35rem; }
   .diff-file-band span { grid-column: 1 / 3; }
-  /* 文件级结论说明与上面的两行堆叠同一列。 */
+  /* #29 复核：文件级结论的说明也不再消失，与上面的两行堆叠同一列。 */
   .diff-file-band > small { grid-column: 1 / 3; white-space: normal; }
   footer { flex-direction: column; }
   /* #33 的测量暴露出来的是**布局**问题，不是文案问题：术语行是 max-content + nowrap，
@@ -1937,7 +1940,7 @@ footer p strong { color: var(--text-soft); font-weight: 600; }
 .memory-notice { display: block; margin-top: 8px; color: var(--text-dim);
   font-size: var(--font-size-floor); line-height: 1.55; }
 
-/* ---- 共享的字体、间距和组件语法 -----------------
+/* ---- 决赛展示收口：共享的字体、间距和组件语法 -----------------
    不改 DOM 与业务状态；这里只将三种界面收敛到同一套视觉层级。 */
 :root {
   --font-sans: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
@@ -2773,7 +2776,10 @@ body {
   .journey-nav .stage-dot { padding-inline: 3px; }
 }
 
-/* 五格在窄屏挤不下时换成三格一行，避免标签折叠过窄或产生横向滚动。 */
+/* #31 复核：五格硬挤成一排时，每格的标签正文约等于 视口/5 减 40px——实测 390px 上只剩
+   25px 宽（标签折成四行、整条导航长到 136px），700px 附近才回到能读的约 100px。
+   所以只在挤不下时换成三格一行：标签回到约 90–150px、两行读完，且不产生横向滚动
+   （比让轨道滚动更安全：轨道滚动会让子元素被溢出护栏算成伸出视口）。 */
 @media (max-width: 700px) {
   .journey-nav { flex-wrap: wrap; }
   .journey-nav .stage-dot { flex: 1 1 30%; }
@@ -3057,3 +3063,59 @@ header p, .implementation-mark, .run-review-id, .run-facts summary,
 @media (max-width: 860px) {
   .receipt-body { grid-template-columns: 1fr; }
 }
+
+/* ---- Task 5（U05–U09、N08）：结果总览、统一动作区与技术抽屉 ---- */
+/* U08：主操作高 48px、桌面最小宽 240px；窄屏全宽；次按钮同高等宽。 */
+.stage-actions { display: flex; align-items: stretch; gap: 12px; flex-wrap: wrap;
+  margin: 18px 0 6px; }
+.stage-actions .stage-next, .stage-actions .primary { min-width: 240px; min-height: 48px; }
+.stage-actions button { min-height: 48px; flex: 1 1 180px; }
+@media (max-width: 700px) { .stage-actions { flex-direction: column; }
+  .stage-actions button { width: 100%; flex-basis: auto; } }
+
+/* U05/U07：与目标相关的主要缺口。 */
+.goal-gaps { margin: 14px 0; padding: 12px 14px; border-left: 3px solid var(--warn, #b8860b);
+  display: grid; gap: 8px; }
+.goal-gaps strong { font-size: 14px; }
+.goal-gaps ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.goal-gaps button { display: flex; gap: 10px; align-items: baseline; width: 100%;
+  text-align: left; padding: 6px 8px; border: 1px solid transparent;
+  background: none; color: inherit; cursor: pointer; }
+.goal-gaps button:hover { border-color: var(--line, #ccc); }
+.goal-gaps code { flex: none; }
+.goal-gaps span { overflow-wrap: anywhere; }
+
+/* U09：统一导出入口（护照折叠为导出预览）。 */
+details.unified-export { margin: 14px 0; border: 1px solid var(--line, #ddd);
+  border-radius: 10px; padding: 10px 14px; }
+details.unified-export > summary { cursor: pointer; font-weight: 600; }
+details.unified-export[open] > summary { margin-bottom: 10px; }
+
+/* U06：受控修改区块与第 4 步次级入口。 */
+section.controlled-change { margin: 16px 0; }
+.controlled-change-intro { margin: 4px 0 12px; }
+.controlled-change-entry { display: flex; gap: 12px; align-items: center;
+  flex-wrap: wrap; margin: 12px 0; padding: 10px 14px;
+  border: 1px dashed var(--line, #ccc); border-radius: 10px; }
+
+/* N08：技术资料抽屉默认折叠。 */
+details.tech-drawer { margin: 10px 0; }
+details.tech-drawer > summary { cursor: pointer; color: var(--text-soft, #777); }
+details.release-status-card > summary { font-weight: 600; color: var(--text, inherit); }
+
+/* U05：合并后的结果总览容器。 */
+.result-unified { display: grid; gap: 6px; margin: 10px 0; }
+.result-unified details.minimization { border: 1px solid var(--line, #ddd);
+  border-radius: 10px; padding: 8px 12px; }
+
+/* U03：历史菜单（分组＋搜索＋元数据）。 */
+.history-menu .history-group { display: grid; gap: 4px; margin: 8px 0; }
+.history-menu .history-group > b { font-size: 12px; color: var(--text-soft, #888); }
+.history-menu .history-list button { display: grid; gap: 2px; text-align: left;
+  padding: 6px 8px; border: 1px solid transparent; background: none;
+  color: inherit; cursor: pointer; }
+.history-menu .history-list button:hover { border-color: var(--line, #ccc); }
+.history-menu .history-entry-title { font-weight: 600; }
+.history-menu .history-list small { color: var(--text-soft, #888); }
+.history-menu .history-list code { font-size: 11px; color: var(--text-dim, #999); }
+.history-menu input[type="search"] { width: 100%; margin-bottom: 6px; }

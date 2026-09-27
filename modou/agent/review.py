@@ -42,6 +42,8 @@ class ReviewStatus(str, Enum):
     CANCELLED = "CANCELLED"
 
 
+STATE_SCHEMA_VERSION = "review-state-v1"
+
 TERMINAL = frozenset({ReviewStatus.COMPLETE, ReviewStatus.PARTIAL,
                       ReviewStatus.FAILED, ReviewStatus.ABORTED,
                       ReviewStatus.COMPLETED, ReviewStatus.CANCELLED})
@@ -148,7 +150,7 @@ class ReviewSnapshot:
 
     def as_dict(self) -> dict:
         return {
-            "schema_version": "review-state-v1",
+            "schema_version": STATE_SCHEMA_VERSION,
             "review_id": self.review_id,
             "status": self.status.value,
             "updated_at": self.updated_at,
@@ -180,7 +182,7 @@ class ReviewStore:
     def _load(self) -> ReviewSnapshot:
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-            if raw.get("schema_version") != "review-state-v1":
+            if raw.get("schema_version") != STATE_SCHEMA_VERSION:
                 raise ReviewStateError("unsupported review state schema")
             if raw.get("review_id") != self.review_id:
                 raise ReviewStateError("review id mismatch")

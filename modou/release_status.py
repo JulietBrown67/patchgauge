@@ -1,6 +1,7 @@
-"""Fail-closed v0.2 release status records.
+"""Fail-closed v0.2 internal release status records.
 
-The status deliberately separates machine checks from stable eligibility.
+The status deliberately separates machine checks from stable eligibility.  An
+internal candidate can be useful without becoming a public-release claim.
 """
 from __future__ import annotations
 
@@ -26,11 +27,20 @@ EXTERNAL_GATES = (
     "real_developer_study",
     "independent_security_release_signoff",
 )
-#: 收据把外部门禁保持为 pending，直到对应证据绑定到当前候选。
-#: 这样“不确定只能降级”的规则不会被旧证据或文案改动绕过。
+#: 收据把五道外部门禁一律记为 pending，即使 configs/v02-external-gates.json
+#: 里某一道已有 pass 记录。这不是疏忽，是"不确定只能降级"用在自己身上：
+#: 目前唯一一道有 pass 记录的 independent_linux_host，复核类型是
+#: ai_independent_review，且绑的是 2026-09-04 的旧候选提交
+#: a60f4991ef8194aaca74feab790d30dcc2eadac2，不是当前候选。一份绑在旧提交上
+#: 的复核不能替当前提交担保，所以它在收据里保持 pending。
+#: 要把它从 pending 拿掉，只能由独立授权复核人对当前候选重新出具记录——
+#: 改这里的措辞不算补证据（私有 README 第九条第 5 款）。
+#: 由 tests/test_release_status_serving.py 的一致性用例钉住，防止两份文件
+#: 再次无声分叉。
 GATES_HELD_PENDING_DESPITE_PASS_RECORD = {
     "independent_linux_host":
-        "pass record is not bound to the current candidate",
+        "pass record is an ai_independent_review bound to candidate commit "
+        "a60f4991ef8194aaca74feab790d30dcc2eadac2, not the current candidate",
 }
 NAMED_PENDING_GATES = ("public_repo_matrix",)
 # 矩阵门禁在 round-2 之后要能表达真实结局，而不是永远 SUSPENDED。

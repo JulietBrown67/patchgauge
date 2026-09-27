@@ -483,11 +483,19 @@ export function schedulingDetail(kind: string, data: Record<string, unknown>): s
 // ---- 仓库审查记忆：只读卡的中文呈现 ----------------
 // 规则内容与词表由 modou/agent/memory.py 把守；这里只做展示层翻译。
 // 记忆是上下文，不是授权：卡片永远与红线说明同屏，不提供写入路径。
-const MEMORY_KINDS: Record<string, string> = {
-  review_preference: "审查偏好",
-  known_baseline: "已知基线",
-  test_convention: "测试约定",
-  architecture_constraint: "架构约束",
+const MEMORY_KINDS: Record<string, {label: string; hint: string; example: string}> = {
+  review_preference: {label: "审查偏好",
+    hint: "告诉系统优先关注什么，不改变证据判定标准。",
+    example: "优先检查异常处理与边界值测试。"},
+  known_baseline: {label: "已知基线",
+    hint: "记录已经确认的现状，供下一次审查参考。",
+    example: "某项既有失败已有记录；仍需核对本轮测试事实。"},
+  test_convention: {label: "测试约定",
+    hint: "说明项目使用的测试组织方式与写法。",
+    example: "集成测试放在 tests/integration。"},
+  architecture_constraint: {label: "架构约束",
+    hint: "说明模块之间应遵守的边界。",
+    example: "业务层不直接依赖界面层。"},
 };
 
 export type MemoryRuleView = {
@@ -505,7 +513,7 @@ export function memoryRuleViews(raw: unknown): MemoryRuleView[] {
     if (!memory_id || !rule) continue;
     const kindKey = String(record.kind || "");
     views.push({memory_id, rule,
-      kind: MEMORY_KINDS[kindKey] || kindKey || "规则",
+      kind: MEMORY_KINDS[kindKey]?.label || kindKey || "规则",
       applies_to: Array.isArray(record.applies_to)
         ? record.applies_to.map(path => String(path)).filter(Boolean) : [],
       // intake 注入的 active_rules() 不带 status；写入端点返回的全量记录带。
@@ -514,12 +522,27 @@ export function memoryRuleViews(raw: unknown): MemoryRuleView[] {
   return views;
 }
 
-/** 只读卡标题：同一仓库再次审查时，确认过的记忆规则已经生效。 */
-export const MEMORY_CARD_HEADLINE = "上次你确认的规则，这次已生效";
+/**
+ * N04：卡片标题必须反映真实规则状态。空态如实说“尚未保存”；有生效
+ * 规则才说已生效并给出数量；本会话刚保存的规则属于下一次审查，本轮
+ * 加载的快照不变——不能倒写成已生效。
+ */
+export function memoryHeadline(options: {activeCount: number;
+  savedThisSession: boolean}): string {
+  if (options.savedThisSession) return "已保存，供下次审查使用";
+  if (options.activeCount <= 0) return "尚未保存审查规则";
+  return `上次你确认的 ${options.activeCount} 条规则，本次审查已生效`;
+}
 
 /** 记忆写入表单的种类封闭词表，与 modou/agent/memory.py 的 _KINDS 同源。 */
 export function memoryKindOptions(): Array<{value: string; label: string}> {
-  return Object.entries(MEMORY_KINDS).map(([value, label]) => ({value, label}));
+  return Object.entries(MEMORY_KINDS)
+    .map(([value, item]) => ({value, label: item.label}));
+}
+
+/** U04：四种规则各自的一句解释与示例，与表单同屏展示。 */
+export function memoryKindHelp(value: string): {hint: string; example: string} {
+  return MEMORY_KINDS[value] || {hint: "", example: ""};
 }
 
 /** 规则状态中文标签；未知状态原样展示，不编造。 */
@@ -691,79 +714,175 @@ export type ExperimentStage = {key: "baseline" | "remove" | "regression" | "rest
   label: string; detail: string;
   state: "complete" | "failed" | "active" | "pending"};
 
-type StoryEvent = {kind: string; data?: Record<string, unknown>};
-type StoryCertificate = {unit_id?: string; 状态?: string;
+export type StoryStep = ExperimentStage & {eventId: string | null};
+
+export type TraceableStory = {
+  unitId: string | null;
+  location: {file: string; start: number; end: number} | null;
+  steps: StoryStep[];
+};
+
+type StoryEvent = {kind: string; event_id?: string; data?: Record<string, unknown>};
+// 证书的逐条定级来自证据包，before/after 服务端声明为 unknown；过滤时
+// 逐项 String() 收窄，不在类型上假设比实际载荷更窄的形状。
+type GradedTest = {test_id?: string; before?: unknown; after?: unknown};
+type StoryCertificate = {unit_id?: string; 状态?: string; 逐条定级?: GradedTest[];
+  回滚干净?: boolean | null;
   位置?: {file?: string; start?: number; end?: number}};
 
-export function experimentStory(events: StoryEvent[], certificates: StoryCertificate[] = []): ExperimentStage[] {
+// N01 修复：事件流里的 probe/observation 是**文件级**聚合（同一文件的多个
+// 实验单元共用一条事件），证书才是**单元级**权威记录。故事四帧的位置、
+// 报警、恢复必须全部来自同一张证书；事件只按同文件锚点提供点击跳转，
+// 绝不把别的单元的报警拼进本单元的故事。
+export function traceableStory(
+  events: StoryEvent[],
+  certificates: StoryCertificate[] = [],
+  preferred?: {unitId?: string},
+): TraceableStory {
+  const unit = (preferred?.unitId
+      && certificates.find(cert => cert.unit_id === preferred.unitId))
+    || certificates.find(cert => cert.状态 === "承重")
+    || certificates[0]
+    || null;
+  const anchorFile = String(unit?.位置?.file || "");
+  const byAnchor = (kind: string, predicate?: (data: Record<string, unknown>) => boolean) =>
+    events.find(event => event.kind === kind && (!anchorFile
+      || String(event.data?.anchor_id || "") === anchorFile)
+      && (!predicate || !event.data || predicate(event.data)));
+
   const baselineStarted = events.find(event => event.kind === "baseline.started");
   const baseline = events.find(event => event.kind === "baseline.completed"
     || event.kind === "baseline.failed");
-  const probeStarted = events.find(event => event.kind === "probe.started");
-  const probeResults = events.filter(event => event.kind === "probe.completed"
-    || event.kind === "probe.failed");
-  const preferredCertificate = certificates.find(cert => cert.状态 === "承重") || certificates[0];
-  const preferredAnchor = String(preferredCertificate?.位置?.file || "");
-  const probe = probeResults.find(event => String(event.data?.anchor_id || "") === preferredAnchor)
-    || probeResults.find(event => Array.isArray(event.data?.regressed_tests)
-      && (event.data?.regressed_tests as unknown[]).length > 0)
-    || probeResults[0];
-  const chosen = probe || probeStarted;
-  const anchor = String(chosen?.data?.anchor_id || "候选代码");
-  const observation = events.find(event => event.kind === "observation.recorded"
-    && (!chosen || String(event.data?.anchor_id || "") === anchor)
-    && Array.isArray(event.data?.regressed_tests)
-    && (event.data?.regressed_tests as unknown[]).length > 0);
-  const regressions = (chosen?.data?.regressed_tests || observation?.data?.regressed_tests || []) as unknown[];
-  const restoreStarted = events.find(event => event.kind === "restore.started");
-  const restore = events.find(event => event.kind === "restore.verified"
-    && (!chosen || event.data?.anchor_id === chosen.data?.anchor_id));
   const declared = Number(baseline?.data?.declared_tests || 0);
   const baselinePassed = baseline?.data?.all_passed === true;
-  const restored = restore?.data?.restored_clean === true;
-  const certificate = certificates.find(cert => cert.位置?.file === anchor)
-    || (preferredCertificate?.位置?.file === anchor ? preferredCertificate : undefined);
-  const certificatePosition = certificate?.位置;
-  const lineCount = certificatePosition?.start && certificatePosition.end
-    ? Math.max(1, certificatePosition.end - certificatePosition.start + 1) : 0;
-  const interventionDetail = certificatePosition?.start
-    ? `${anchor}:${certificatePosition.start}${certificatePosition.end && certificatePosition.end !== certificatePosition.start
-      ? `–${certificatePosition.end}` : ""} · ${lineCount} 行`
-    : chosen ? `${anchor}${chosen.data?.units ? ` · ${String(chosen.data.units)} 个实验单元` : ""}` : "";
-  const baselineState = baseline
-    ? baselinePassed ? "complete" : "failed"
-    : baselineStarted ? "active" : "pending";
-  const removeState = probe
-    ? probe.kind === "probe.failed" ? "failed" : "complete"
-    : probeStarted ? "active" : "pending";
-  const regressionState = regressions.length
-    ? "failed"
-    : probe?.kind === "probe.completed" ? "complete" : "pending";
-  const restoreState = restore
-    ? restored ? "complete" : "failed"
-    : restoreStarted ? "active" : "pending";
-  return [
-    {key: "baseline", label: "基线全绿",
-      detail: baseline ? baselinePassed ? `${declared}/${declared} 项测试通过`
-        : `${declared} 项声明测试未全通过` : baselineStarted ? "基线测试进行中" : "等待基线测试",
-      state: baselineState as ExperimentStage["state"]},
-    {key: "remove", label: "临时拿走",
-      detail: chosen ? interventionDetail : probeStarted ? "正在实施可恢复干预" : "等待可恢复实验",
-      state: removeState as ExperimentStage["state"]},
-    {key: "regression", label: "具名测试报警",
-      detail: regressions.length ? String(regressions[0])
-        : probe?.kind === "probe.completed" ? "未观察到具名测试失败" : "等待测试观测",
-      state: regressionState as ExperimentStage["state"]},
-    {key: "restore", label: "恢复干净",
-      detail: restore ? (restored ? `${declared}/${declared} 项测试通过，工作区已恢复`
-        : "恢复校验失败") : restoreStarted ? "恢复校验进行中" : "等待恢复校验",
-      state: restoreState as ExperimentStage["state"]},
-  ];
+
+  const noCertificate: StoryStep[] = (() => {
+    // 运行中还没有证书：退回单锚点事件推导。此时不存在跨单元证书可串，
+    // 四帧仍必须锁定同一个 anchor 的事件，不跨文件拼故事。
+    const probeStarted = events.find(event => event.kind === "probe.started");
+    const probeResults = events.filter(event => event.kind === "probe.completed"
+      || event.kind === "probe.failed");
+    const probe = probeResults.find(event => Array.isArray(event.data?.regressed_tests)
+        && (event.data?.regressed_tests as unknown[]).length > 0)
+      || probeResults[0];
+    const chosen = probe || probeStarted;
+    const anchor = String(chosen?.data?.anchor_id || "候选代码");
+    const regressions = (chosen?.data?.regressed_tests || []) as unknown[];
+    const restoreStarted = events.find(event => event.kind === "restore.started");
+    const restore = events.find(event => event.kind === "restore.verified"
+      && (!chosen || event.data?.anchor_id === chosen.data?.anchor_id));
+    const restored = restore?.data?.restored_clean === true;
+    return [
+      {key: "baseline", label: "基线全绿",
+        detail: baseline ? baselinePassed ? `${declared}/${declared} 项测试通过`
+          : `${declared} 项声明测试未全通过` : baselineStarted ? "基线测试进行中" : "等待基线测试",
+        state: baseline ? (baselinePassed ? "complete" : "failed") : baselineStarted ? "active" : "pending",
+        eventId: baseline?.event_id ?? baselineStarted?.event_id ?? null},
+      {key: "remove", label: "临时拿走",
+        detail: chosen ? `${anchor}${chosen.data?.units ? ` · ${String(chosen.data.units)} 个实验单元` : ""}`
+          : probeStarted ? "正在实施可恢复干预" : "等待可恢复实验",
+        state: probe ? (probe.kind === "probe.failed" ? "failed" : "complete") : probeStarted ? "active" : "pending",
+        eventId: chosen?.event_id ?? probeStarted?.event_id ?? null},
+      {key: "regression", label: "具名测试报警",
+        detail: regressions.length ? String(regressions[0])
+          : probe?.kind === "probe.completed" ? "未观察到具名测试失败" : "等待测试观测",
+        state: regressions.length ? "failed"
+          : probe?.kind === "probe.completed" ? "complete" : "pending",
+        eventId: probe?.kind === "probe.completed" && regressions.length
+          ? probe.event_id ?? null : null},
+      {key: "restore", label: "恢复干净",
+        detail: restore ? (restored ? `${declared}/${declared} 项测试通过，工作区已恢复`
+          : "恢复校验失败") : restoreStarted ? "恢复校验进行中" : "等待恢复校验",
+        state: restore ? (restored ? "complete" : "failed") : restoreStarted ? "active" : "pending",
+        eventId: restore?.event_id ?? restoreStarted?.event_id ?? null},
+    ];
+  })();
+
+  if (!unit) return {unitId: null, location: null, steps: noCertificate};
+
+  const position = unit.位置 || {};
+  const start = Number(position.start || 0);
+  const end = Number(position.end || start);
+  const lineCount = start ? Math.max(1, end - start + 1) : 0;
+  const interventionDetail = start
+    ? `${anchorFile}:${start}${end !== start ? `–${end}` : ""} · ${lineCount} 行`
+    : "（证书未记录位置）";
+  const graded = Array.isArray(unit.逐条定级) ? unit.逐条定级 : [];
+  // 报警只认本单元证书的逐条定级：passed → 非passed 才算移除引发的报警。
+  // 文件级事件的 regressed_tests 属于同文件所有单元的并集，不作为本单元依据。
+  const unitRegressions = graded
+    .filter(item => String(item.before || "").toLowerCase() === "passed"
+      && String(item.after || "").toLowerCase() !== "passed"
+      && String(item.test_id || ""))
+    .map(item => String(item.test_id));
+  const probeDone = byAnchor("probe.completed") || byAnchor("probe.failed");
+  const probeStarted = byAnchor("probe.started");
+  const observation = byAnchor("observation.recorded", data =>
+    Array.isArray(data.regressed_tests)
+    && (data.regressed_tests as unknown[]).length > 0);
+  const restoreStarted = byAnchor("restore.started");
+  const restoreVerified = byAnchor("restore.verified");
+  // 恢复优先用本单元证书的回滚记录；证书未记录时才看同一实验的文件级
+  // restore.verified（同一锚点运行，不属于其他实验）。
+  const restoredClean = typeof unit.回滚干净 === "boolean"
+    ? unit.回滚干净 : restoreVerified?.data?.restored_clean === true;
+  const hasRestoreEvidence = typeof unit.回滚干净 === "boolean" || Boolean(restoreVerified);
+
+  return {
+    unitId: unit.unit_id || null,
+    location: start ? {file: anchorFile, start, end} : null,
+    steps: [
+      {key: "baseline", label: "基线全绿",
+        detail: baseline ? baselinePassed ? `${declared}/${declared} 项测试通过`
+          : `${declared} 项声明测试未全通过` : baselineStarted ? "基线测试进行中" : "等待基线测试",
+        state: baseline ? (baselinePassed ? "complete" : "failed") : baselineStarted ? "active" : "pending",
+        eventId: baseline?.event_id ?? baselineStarted?.event_id ?? null},
+      {key: "remove", label: "临时拿走",
+        detail: interventionDetail,
+        state: probeDone ? (probeDone.kind === "probe.failed" ? "failed" : "complete")
+          : probeStarted ? "active" : "complete",
+        eventId: probeDone?.event_id ?? probeStarted?.event_id ?? null},
+      {key: "regression", label: "具名测试报警",
+        detail: unitRegressions.length ? unitRegressions[0] : "未观察到具名测试失败",
+        state: unitRegressions.length ? "failed" : "complete",
+        eventId: unitRegressions.length && observation
+          ? observation.event_id ?? null : null},
+      {key: "restore", label: "恢复干净",
+        detail: hasRestoreEvidence ? (restoredClean
+          ? `${declared}/${declared} 项测试通过，工作区已恢复` : "恢复校验失败")
+          : restoreStarted ? "恢复校验进行中" : "本单元证书未记录恢复校验",
+        state: hasRestoreEvidence ? (restoredClean ? "complete" : "failed")
+          : restoreStarted ? "active" : "pending",
+        eventId: restoreVerified?.event_id ?? restoreStarted?.event_id ?? null},
+    ],
+  };
 }
 
-export type WorkspaceFocus = "current_result" | "next_run_setup";
+export function experimentStory(events: StoryEvent[], certificates: StoryCertificate[] = []): ExperimentStage[] {
+  return traceableStory(events, certificates).steps;
+}
 
-export type WorkspacePresentation = {
+// N09：数据范围文案的唯一权威。授权摘要与模型契约必须从同一份
+// model_data_categories 派生——一边列类别、一边硬编码“另发 80 行”
+// 的两套口径，正是展示与实际载荷不一致的来源。
+const DATA_CATEGORY_LABELS: Record<string, string> = {
+  metadata: "结构化元数据",
+  diff_summary: "变更摘要（文件与行号）",
+  test_facts: "测试事实",
+  selected_snippets: "所选代码片段文本",
+};
+
+export function dataCategoryLabels(categories: unknown): string {
+  const list = Array.isArray(categories) ? categories.map(String) : [];
+  const labels = list.map(item => DATA_CATEGORY_LABELS[item] || item);
+  return labels.length ? labels.join(" · ") : "最小结构化事实";
+}
+
+export function snippetsAuthorized(categories: unknown): boolean {
+  return Array.isArray(categories) && categories.map(String).includes("selected_snippets");
+}
+
+export type WorkspaceFocus = "current_result" | "next_run_setup";export type WorkspacePresentation = {
   showCurrentResult: boolean;
   showModelTrack: boolean;
   showModelBanner: boolean;
@@ -2066,4 +2185,69 @@ export function normalizeEvalReceipt(raw: unknown): EvalReceiptView | null {
     criteriaPassed: criteria.filter(criterion => criterion.passed).length,
     arms: Object.keys(armsRaw).map(key => receiptArmView(key, armsRaw[key])),
   };
+}
+
+// ---- U03：审查历史的分组与搜索（纯函数，日期用本地时区） ----------
+export type HistoryEntry = {
+  review_id: string; created_at: string | number | null;
+  case_name?: string | null; title?: string | null;
+  requirement_excerpt?: string | null;
+  review_status?: string | null; closure_status?: string | null;
+};
+
+export const REVIEW_STATUS_LABELS: Record<string, string> = {
+  COMPLETE: "审查完成", PARTIAL: "部分完成", FAILED: "审查失败",
+  ABORTED: "已中止", AWAITING_APPROVAL: "等待确认", RUNNING: "运行中",
+  PENDING: "排队中", CANCELLING: "正在取消", RECOVERING: "恢复中",
+};
+
+export function historyEntryTitle(entry: HistoryEntry): string {
+  return String(entry.title || entry.case_name || "").trim() || "未命名审查";
+}
+
+export function historyEntryTime(entry: HistoryEntry): Date | null {
+  const raw = entry.created_at;
+  const date = raw === null || raw === undefined ? null
+    : typeof raw === "number" ? new Date(raw * 1000) : new Date(String(raw));
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function dayKey(date: Date): string {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
+/** 按本地日期分组倒序；时间未知的旧记录归入“时间未知”，不用打开时间冒充。 */
+export function historyGroups(entries: HistoryEntry[]): Array<{
+  key: string; label: string; entries: HistoryEntry[]}> {
+  const withDates = entries
+    .map(entry => ({entry, date: historyEntryTime(entry)}))
+    .filter(item => item.date !== null);
+  const unknown = entries.filter(entry => historyEntryTime(entry) === null);
+  const sorted = withDates.sort((a, b) => b.date!.getTime() - a.date!.getTime());
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 86400_000);
+  const buckets = new Map<string, {label: string; entries: HistoryEntry[]}>();
+  for (const item of sorted) {
+    const date = item.date!;
+    const key = dayKey(date);
+    if (!buckets.has(key)) {
+      const label = dayKey(date) === dayKey(today) ? "今天"
+        : dayKey(date) === dayKey(yesterday) ? "昨天"
+        : date.toLocaleDateString("zh-CN", {year: "numeric", month: "long", day: "numeric"});
+      buckets.set(key, {label, entries: []});
+    }
+    buckets.get(key)!.entries.push(item.entry);
+  }
+  const groups = [...buckets.entries()].map(([key, value]) => ({key, ...value}));
+  if (unknown.length) groups.push({key: "unknown", label: "时间未知", entries: unknown});
+  return groups;
+}
+
+/** 按标题/案例名/验收要求摘要搜索（大小写不敏感、子串匹配）。 */
+export function filterHistoryEntries(entries: HistoryEntry[], query: string): HistoryEntry[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return entries;
+  return entries.filter(entry =>
+    [entry.title, entry.case_name, entry.requirement_excerpt, entry.review_id]
+      .some(field => String(field || "").toLowerCase().includes(needle)));
 }

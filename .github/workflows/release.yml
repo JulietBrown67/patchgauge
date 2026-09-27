@@ -10,8 +10,6 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      RELEASE_NOTES_PATH: docs/release/${{ github.ref_name }}.md
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,9 +21,7 @@ jobs:
           cache-dependency-path: requirements-agent.in
       - run: pip install -r requirements-agent.in
       - name: Scan public tree and frozen release Notes
-        run: |
-          test -f "$RELEASE_NOTES_PATH"
-          python tools/public_release_check.py --root "$GITHUB_WORKSPACE" --notes-file "$RELEASE_NOTES_PATH"
+        run: python tools/public_release_check.py --root "$GITHUB_WORKSPACE" --notes-file "docs/release/${GITHUB_REF_NAME}.md"
       - name: Verify release metadata and public tree
         env:
           EXPECTED_PUBLIC_TREE_SHA256: ${{ vars.PUBLIC_TREE_SHA256 }}
@@ -60,7 +56,7 @@ jobs:
         run: |
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
-          notes="$RELEASE_NOTES_PATH"
+          notes="docs/release/${tag}.md"
           title="水木验码 $tag"
           if existing="$(gh release view "$tag" --json isPrerelease,body,name,targetCommitish 2>/dev/null)"; then
             RELEASE_JSON="$existing" python tools/release_metadata.py verify-existing-release \

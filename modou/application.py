@@ -27,6 +27,10 @@ from typing import Iterator
 from . import inputs, paths
 from .inputs import InputError, ResolvedInput
 
+#: 冻结样本评测的缺省 scaffold。事实源在这里；``tools/run_one.TOOLS``
+#: 反向 import 同一常量（tools 不进 wheel，方向只能是 tools → modou）。
+DEFAULT_BENCHMARK_SCAFFOLD = "20241022_tools_claude-3-5-sonnet-updated"
+
 
 class ExecutionMode(str, Enum):
     """执行模式必须显式，且必须写进产物。
@@ -119,8 +123,10 @@ class AnalysisRequest:
 
 
 def _default_scaffold() -> str:
-    from tools.run_one import TOOLS
-    return TOOLS
+    # 基准样本 scaffold id。曾经 ``from tools.run_one import TOOLS``——tools
+    # 不进 wheel，安装后的包里这行 import 会断；字符串收进包内，
+    # tools/run_one.py 反向引用同一常量，单一事实源不变。
+    return DEFAULT_BENCHMARK_SCAFFOLD
 
 
 @dataclass(frozen=True)

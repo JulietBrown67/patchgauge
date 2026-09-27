@@ -82,7 +82,7 @@ class DelegationService:
 
     def _derived(self, auth):
         """读取时按事实推导状态：过期与额度耗尽不等下次写入才成立；
-        要求版本变化也只读推导——GET 不投递、不落事件，
+        要求版本变化也只读推导（R4，08430cc 复核）——GET 不投递、不落事件，
         只是不再把"要求已变"的授权显示成仍然有效。"""
         now = time.time()
         status = auth.get("status", "active")
@@ -350,7 +350,7 @@ class DelegationService:
     def _runner(self, ctx):
         """delegation_check 作业体。
 
-        执行前核对这份作业确实是授权服务亲自登记的
+        R1（08430cc 复核）：执行前核对这份作业确实是授权服务亲自登记的
         派发记录（job_id 在授权的 dispatched_snapshots 里、payload 快照/
         要求与登记一致、绑定授权专属预算账本且有预留）——通用作业接口
         直创、伪造字段、未绑定预算的作业在这里全部失败关闭。

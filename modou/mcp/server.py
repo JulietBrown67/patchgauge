@@ -334,7 +334,7 @@ def _get_task_delegation(backend, args):
 
 
 def _check_task_delegation(backend, args):
-    # 在既有有效授权下触发检查事件。服务端状态机决定
+    # R3（08430cc 复核）：在既有有效授权下触发检查事件。服务端状态机决定
     # 投递/无变化/拒绝；这里没有任何创建、续期或扩大授权的入口。
     return backend.client.delegation_check(str(args.get("task_id") or ""),
                                            str(args.get("reason") or "mcp"))

@@ -16,12 +16,18 @@ export type TaskCandidate = {source: string; patch: string; patch_sha256: string
 export type AdoptionPlan = {plan_sha256: string; source_snapshot_sha256: string;
   patch_sha256: string; paths: string[]; test_files: string[]; budget_seconds: number;
   expires_at?: number | string; status?: string};
+// U10：服务端只读能力投影。allowed_actions 只回答状态机问题；这里给出
+// “能否执行＋阻塞原因＋恢复方式”，与 propose_test 真正执行时的授权闸一致。
+export type ActionCapability = {enabled: boolean; code: string | null;
+  reason: string | null;
+  recovery: "configure_new_review" | "retry" | "refresh" | "none"};
 export type TaskCriterion = {criterion_id: string; text: string; finding_ids: string[];
   evidence_kind?: string; profile_id?: string; language?: string; adapter_id?: string;
   test_targets?: string[]; adoption_mode?: string; source_snapshot_matches?: boolean; status: string; disposition?: string;
   candidate?: TaskCandidate | null; adoption_plan?: AdoptionPlan | null;
   target_mapping?: TaskTargetMapping | null;
   followup_review_id?: string; allowed_actions: string[];
+  action_capabilities?: Record<string, ActionCapability>;
   proposal_attempt?: Record<string, unknown>; experiment?: Record<string, unknown>;
   outcome?: {status: string; improved?: boolean; reason?: string; origin_rows?: unknown[]; followup_rows?: unknown[]}};
 // 服务端形状见 modou/target_mapping.py 的 MappingReport.as_dict()。
@@ -35,6 +41,56 @@ export type EvidenceTask = {schema_version: string; task_id: string; origin_revi
 type Api = <T>(path: string, init?: RequestInit) => Promise<T>;
 type ExistingCandidate = {source: string; sha256: string; label: string};
 type Finding = {file: string; line: number; label: string; text: string};
+// 服务端 set_targets 的硬上限（tasks._targets：finding_ids 至多 20 条）。
+// 前端提前就地说明，不让用户提交后才看到英文错误。
+export const MAX_FINDING_REFS = 20;
+
+// N03：绑定目标按文件分组；空行/注释等非行为行默认折叠，保留查看能力。
+export type FindingGroup = {file: string; behavior: Finding[]; nonBehavior: Finding[]};
+
+const NON_EXECUTABLE = /^\s*($|#|"""|'''|[)\]},:]+\s*$)/;
+
+export function isNonBehaviorFinding(finding: Finding): boolean {
+  return !finding.text.trim() || NON_EXECUTABLE.test(finding.text);
+}
+
+export function groupFindings(findings: Finding[]): FindingGroup[] {
+  const byFile = new Map<string, FindingGroup>();
+  for (const finding of findings) {
+    const group = byFile.get(finding.file)
+      || {file: finding.file, behavior: [], nonBehavior: []};
+    (isNonBehaviorFinding(finding) ? group.nonBehavior : group.behavior).push(finding);
+    byFile.set(finding.file, group);
+  }
+  // 行为行多的文件排前；非行为行整组保留在折叠区。
+  return [...byFile.values()].sort((a, b) =>
+    b.behavior.length - a.behavior.length || a.file.localeCompare(b.file));
+}
+
+/**
+ * N03：推荐绑定。只做两个可解释的信号：验收文本与目标里的 ASCII 标识符
+ * 和代码行重合；或按文本里的意图词（依据/接入/约束）对应三态标签。
+ * 推荐只是待确认的建议，勾选与保存始终由用户完成。
+ */
+export function recommendedFindingIds(findings: Finding[], intentText: string): string[] {
+  const text = intentText || "";
+  const identifiers = new Set((text.match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || []));
+  const wantsGap = /依据|覆盖|无据|没有证据|补测/.test(text);
+  const wantsDrift = /接入|游离|调用/.test(text);
+  const wantsLoad = /承重|约束|保护|约束/.test(text);
+  const idOf = (finding: Finding) => `${finding.file}:${finding.line}`;
+  const recommended: string[] = [];
+  for (const finding of findings) {
+    if (isNonBehaviorFinding(finding)) continue;
+    const tokens = finding.text.match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || [];
+    const identifierHit = tokens.some(token => identifiers.has(token));
+    const labelHit = (wantsGap && finding.label === "无据")
+      || (wantsDrift && finding.label === "游离")
+      || (wantsLoad && finding.label === "承重");
+    if (identifierHit || labelHit) recommended.push(idOf(finding));
+  }
+  return recommended.slice(0, MAX_FINDING_REFS);
+}
 const STATUS: Record<string, string> = {pending: "等待选择处置", selected: "已选择处置",
   generating: "正在生成与验证", candidate_ready: "候选已封存", prepared: "等待确认采用",
   applying: "正在采用", adopted: "已采用，等待复验", reviewing: "新版本复验中",
@@ -47,13 +103,44 @@ export function taskOutcomeLabel(status?: string): string {
 export function canTaskAction(criterion: TaskCriterion, action: string): boolean {
   return Array.isArray(criterion.allowed_actions) && criterion.allowed_actions.includes(action);
 }
+export function actionCapability(criterion: TaskCriterion, action: string): ActionCapability | undefined {
+  return criterion.action_capabilities?.[action];
+}
+// U10：任务动作错误按稳定错误码给出中文解释。服务端返回的是权威判定，
+// 这里只做展示映射；未知码回退原始消息，不猜测原因。
+const TASK_ERROR_TEXT: Record<string, string> = {
+  REPAIR_NOT_AUTHORIZED: "本次审查创建时未授权生成补测候选。当前任务与已选发现已保留；需要创建一次带该授权的新审查。",
+  REPAIR_DATA_NOT_AUTHORIZED: "本次授权未允许把所选代码片段发送给模型，因此不能生成补测候选。",
+  STANDARD_MODE_MODEL_FORBIDDEN: "标准审查承诺零模型调用；生成补测候选需要带模型授权的智能体审查。",
+  MODEL_PROVIDER_UNAVAILABLE: "模型服务未配置或暂不可用，暂时无法生成补测候选。",
+  SOURCE_SNAPSHOT_CHANGED: "源码在审查后已变化，原证据不能用于当前版本；请基于当前版本创建新审查。",
+  REPAIR_REVIEW_NOT_COMPLETE: "原审查尚未完成，暂不能提议补测。",
+  REPAIR_EVIDENCE_INVALID: "证据包未通过完整性校验，暂不能提议补测。",
+  REPAIR_PLAN_MISSING: "缺少可验证的冻结计划，暂不能提议补测。",
+  REPAIR_WORKTREE_DIRTY: "隔离工作区需要清理后才能继续。",
+  REPAIR_CLEANUP_REQUIRED: "隔离工作区需要清理后才能继续。",
+  TASK_VERIFICATION_TIMEOUT: "候选验证超出时间预算；可稍后重试，已有验证记录不会丢失。",
+  TASK_STATE_INVALID: "当前状态下该动作不可用；请重新读取处置状态。",
+  TASK_TARGET_REQUIRED: "请先选择具体目标发现并确认处置路径。",
+  IDEMPOTENCY_CONFLICT: "同一操作键被重复使用；请重新发起操作。",
+  TASK_ROUND_RECHECK_REQUIRED: "源码版本已变化；需要先复验当前版本再重试。",
+  TASK_UNTRACKED_SOURCE: "工作区存在未跟踪的新文件；需要先纳入审查范围或移除后再采用。",
+};
+export function taskErrorText(error: unknown): string {
+  if (error instanceof Error) {
+    const code = (error as Error & {code?: unknown}).code;
+    if (typeof code === "string" && TASK_ERROR_TEXT[code]) return `${TASK_ERROR_TEXT[code]}（${code}）`;
+    return error.message;
+  }
+  return "请求未完成，请重新读取状态后重试。";
+}
 export function taskLink(taskId: string): string { return `#task=${encodeURIComponent(taskId)}`; }
 export function taskRequirements(text: string): Array<{text: string; finding_ids: string[]}> {
   return text.split("\n").map(value => value.trim()).filter(Boolean)
     .map(value => ({text: value, finding_ids: []}));
 }
 function readableError(error: unknown): string {
-  return error instanceof Error ? error.message : "请求未完成，请重新读取状态后重试。";
+  return taskErrorText(error);
 }
 function downloadJson(value: unknown, name: string) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], {type: "application/json"}));
@@ -147,30 +234,72 @@ export function TaskSummaryCard({summary, busy, onNext, delegationActive}: {
   </section>;
 }
 
-export function TaskRequirementsCard({value, onChange, disabled}: {
+export function TaskRequirementsCard({value, onChange, disabled, contextLabel, suggestion}: {
   value: string; onChange: (value: string) => void; disabled: boolean;
+  contextLabel?: string; suggestion?: string | null;
 }) {
+  // U02：建议只推荐，不自动认定。空输入且建议可见时，第一次 Tab 接受，
+  // 第二次 Tab 正常移焦；Esc 关闭建议；按钮提供鼠标与读屏入口。
+  const [dismissedSuggestion, setDismissedSuggestion] = useState("");
+  const suggestionVisible = Boolean(suggestion) && suggestion !== dismissedSuggestion;
+  const acceptSuggestionNow = () => { if (suggestion) onChange(suggestion); };
   return <section className="task-requirements" aria-label="本次验收要求">
     <h4>本次要取得什么测试依据？</h4>
-    <label htmlFor="task-requirements">验收要求（可选，每行一项）</label>
+    <label htmlFor="task-requirements">验收要求（可选，每行一项）
+      {contextLabel && <span className="requirement-context"> · 随「{contextLabel}」保存</span>}</label>
     <textarea id="task-requirements" rows={3} value={value} disabled={disabled}
       onChange={event => onChange(event.target.value)}
+      onKeyDown={event => {
+        if (event.key === "Tab" && suggestionVisible && !value.trim()) {
+          event.preventDefault();
+          acceptSuggestionNow();
+        } else if (event.key === "Escape" && suggestionVisible) {
+          setDismissedSuggestion(suggestion || "");
+        }
+      }}
       placeholder="例如：新增绩点计算包含不及格课程的测试依据" />
+    {suggestionVisible && !value.trim() && <div className="requirement-suggestion" role="note">
+      <span>建议：{firstLine(suggestion)}</span>
+      <button type="button" disabled={disabled} onClick={acceptSuggestionNow}>使用推荐要求</button>
+      <small>按 Tab 采纳，Esc 关闭；采纳后可继续修改。</small>
+    </div>}
     <p className="field-note">随新审查保存，在第 6 步关联具体发现并处置。这里只记录你确认的要求，不自动认定功能已完成。</p>
   </section>;
 }
 
+function firstLine(text?: string | null): string {
+  const line = (text || "").split("\n").map(v => v.trim()).find(Boolean);
+  const rest = (text || "").split("\n").map(v => v.trim()).filter(Boolean).length - 1;
+  return rest > 0 && line ? `${line} 等 ${rest + 1} 项` : (line || "");
+}
+
+export type ClosurePulse = "none" | "pending" | "done" | "gap";
+
+export function closurePulseOf(task?: EvidenceTask | null): ClosurePulse {
+  // U11：第 6 步导航状态的唯一来源。没有任务＝未处置；全部 supported/
+  // accepted_risk＝已有结论；观察到缺口＝仍有缺口；其余（含实验未完成、
+  // 环境失败）一律处置进行中，不得显示完成。
+  if (!task || !task.criteria.length) return "none";
+  const statuses = task.criteria.map(item => item.outcome?.status || "pending");
+  if (statuses.every(status => status === "supported" || status === "accepted_risk")) return "done";
+  if (statuses.includes("gap_remains") || statuses.includes("regression_observed")) return "gap";
+  return "pending";
+}
+
 export function TaskClosure({reviewId, reviewComplete, offline, ranAsAgent, findings,
-  preferredTaskId, api, onOpenReview, onOpenRepair, onNewAgentReview}: {
+  preferredTaskId, intentHint, api, onOpenReview, onOpenRepair, onNewAgentReview, onClosurePulse}: {
   reviewId?: string; reviewComplete: boolean; offline: boolean; ranAsAgent: boolean;
-  findings: Finding[]; preferredTaskId?: string; api: Api;
+  findings: Finding[]; preferredTaskId?: string; intentHint?: string; api: Api;
   onOpenReview: (id: string) => void; onOpenRepair: () => void; onNewAgentReview: () => void;
+  onClosurePulse?: (pulse: ClosurePulse) => void;
 }) {
   const [tasks, setTasks] = useState<EvidenceTask[]>([]);
   const [selected, setSelected] = useState(preferredTaskId || "");
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  // U10：验收项动作的错误贴在对应卡片内，与触发它的操作放在一起。
+  const [actionError, setActionError] = useState<{criterion_id: string; text: string} | null>(null);
   const [title, setTitle] = useState("");
   const [requirements, setRequirements] = useState("");
   const [creatingNew, setCreatingNew] = useState(false);
@@ -229,6 +358,9 @@ export function TaskClosure({reviewId, reviewComplete, offline, ranAsAgent, find
   useEffect(() => {if (preferredTaskId) setSelected(preferredTaskId);}, [preferredTaskId]);
   // N04：轮次历史随任务读取；任务状态推进（轮次可能新增）后一起刷新。
   const statusKey = task?.criteria.map(item => item.status).join(",") || "";
+  // U11：把任务真实结论上报给六步导航；进入第 6 步页面本身不构成完成。
+  useEffect(() => {onClosurePulse?.(closurePulseOf(task));}, [task?.task_id, statusKey]);
+  useEffect(() => {if (!loaded && !task) onClosurePulse?.("none");}, [loaded, task]);
   useEffect(() => {
     if (!task?.task_id || offline) {setRoundsData(null); return;}
     const currentGeneration = generation.current;
@@ -305,14 +437,17 @@ export function TaskClosure({reviewId, reviewComplete, offline, ranAsAgent, find
   async function action(criterionId: string, kind: string, data: Record<string, unknown> = {}) {
     if (!task || busy) return;
     const currentGeneration = generation.current;
-    setBusy(criterionId); setError("");
+    setBusy(criterionId); setError(""); setActionError(null);
     try {
       const next = await api<EvidenceTask>(`/api/v2/tasks/${encodeURIComponent(task.task_id)}/actions`, {
         method: "POST", headers: {"Idempotency-Key": crypto.randomUUID()},
         body: JSON.stringify({action: kind, criterion_id: criterionId, ...data}),
       });
       if (currentGeneration === generation.current) replaceTask(next);
-    } catch (err) {if (currentGeneration === generation.current) setError(readableError(err));}
+    } catch (err) {if (currentGeneration === generation.current)
+      // U10：错误贴在触发它的验收项旁，并给出中文原因；不再只在面板顶部
+      // 显示一条与操作脱节的原始报错。
+      setActionError({criterion_id: criterionId, text: readableError(err)});}
     finally {if (currentGeneration === generation.current) setBusy("");}
   }
   async function create() {
@@ -430,7 +565,8 @@ export function TaskClosure({reviewId, reviewComplete, offline, ranAsAgent, find
             </section>;
           })()}
           {task.criteria.map(criterion => <CriterionCard key={criterion.criterion_id} criterion={criterion}
-            findings={findings} busy={!!busy} ranAsAgent={ranAsAgent} existingCandidates={existingCandidates}
+            findings={findings} intentHint={intentHint} busy={!!busy} ranAsAgent={ranAsAgent} existingCandidates={existingCandidates}
+            actionError={actionError?.criterion_id === criterion.criterion_id ? actionError.text : undefined}
             onAction={(kind, data) => action(criterion.criterion_id, kind, data)}
             onOpenReview={onOpenReview} onOpenRepair={onOpenRepair} onNewAgentReview={onNewAgentReview} />)}
           {roundsData && <RoundHistoryView rounds={roundsData.rounds.map(adaptRoundRow)}
@@ -475,8 +611,9 @@ export function TaskClosure({reviewId, reviewComplete, offline, ranAsAgent, find
   </section>;
 }
 
-function CriterionCard({criterion: c, findings, busy, ranAsAgent, existingCandidates, onAction, onOpenReview, onOpenRepair, onNewAgentReview}: {
-  criterion: TaskCriterion; findings: Finding[]; busy: boolean; ranAsAgent: boolean; existingCandidates: ExistingCandidate[];
+function CriterionCard({criterion: c, findings, intentHint, busy, ranAsAgent, existingCandidates, actionError, onAction, onOpenReview, onOpenRepair, onNewAgentReview}: {
+  criterion: TaskCriterion; findings: Finding[]; intentHint?: string; busy: boolean; ranAsAgent: boolean; existingCandidates: ExistingCandidate[];
+  actionError?: string;
   onAction: (action: string, data?: Record<string, unknown>) => Promise<void>;
   onOpenReview: (id: string) => void; onOpenRepair: () => void; onNewAgentReview: () => void;
 }) {
@@ -504,13 +641,44 @@ function CriterionCard({criterion: c, findings, busy, ranAsAgent, existingCandid
     </div>
     {(!c.evidence_kind || c.evidence_kind === "python_experiment") && canTaskAction(c, "set_targets") && <fieldset disabled={busy}>
       <legend>关联这项要求的具体发现</legend>
-      {findings.length ? <div className="closure-findings">{findings.map(finding => {
-        const id = `${finding.file}:${finding.line}`;
-        return <label key={id}><input type="checkbox" checked={targets.includes(id)} onChange={event =>
-          setTargets(old => event.target.checked ? [...old, id] : old.filter(value => value !== id))} />
-          <span><code>{id}</code> · {finding.label}<small>{finding.text}</small></span></label>;
-      })}</div> : <p className="field-note">还没有可关联的逐行发现。</p>}
-      <button disabled={!allowed("set_targets") || !targets.length}
+      {findings.length ? <>
+        {(() => {
+          const groups = groupFindings(findings);
+          const recommended = recommendedFindingIds(findings, intentHint || c.text);
+          const overLimit = targets.length > MAX_FINDING_REFS;
+          return <>
+            <p className="field-note">已选 {targets.length}/{MAX_FINDING_REFS} 条
+              {overLimit && <strong className="closure-limit-warn"> —— 超出上限，服务端每个验收项最多绑定 {MAX_FINDING_REFS} 条发现引用</strong>}</p>
+            {recommended.length > 0 && targets.length === 0 && <div className="closure-recommend" role="note">
+              <span>按本次目标建议关联 {recommended.length} 条（含无据/相关标识行，需你确认）</span>
+              <button type="button" disabled={busy}
+                onClick={() => setTargets(recommended)}>填入建议关联</button>
+            </div>}
+            {groups.map(group => <div key={group.file} className="closure-finding-group">
+              <h5>{group.file}<small>{group.behavior.length} 行行为代码</small></h5>
+              <div className="closure-findings">{group.behavior.map(finding => {
+                const id = `${finding.file}:${finding.line}`;
+                return <label key={id} className={recommended.includes(id) ? "recommended" : undefined}>
+                  <input type="checkbox" checked={targets.includes(id)} onChange={event =>
+                    setTargets(old => event.target.checked ? [...old, id] : old.filter(value => value !== id))} />
+                  <span><code>{id}</code> · {finding.label}
+                    {recommended.includes(id) && <em className="rec-mark">建议</em>}
+                    <small>{finding.text}</small></span></label>;
+              })}</div>
+              {group.nonBehavior.length > 0 && <details className="closure-nonbehavior">
+                <summary>{group.nonBehavior.length} 行空行/注释等非行为行（不作为补测目标，保留查看）</summary>
+                <div className="closure-findings">{group.nonBehavior.map(finding => {
+                  const id = `${finding.file}:${finding.line}`;
+                  return <label key={id}><input type="checkbox" checked={targets.includes(id)} onChange={event =>
+                    setTargets(old => event.target.checked ? [...old, id] : old.filter(value => value !== id))} />
+                    <span><code>{id}</code> · {finding.label}<small>{finding.text || "（空行）"}</small></span></label>;
+                })}</div>
+              </details>}
+            </div>)}
+          </>;
+        })()}
+      </> : <p className="field-note">还没有可关联的逐行发现。</p>}
+      <button disabled={!allowed("set_targets") || !targets.length || targets.length > MAX_FINDING_REFS}
         onClick={() => void onAction("set_targets", {finding_ids: targets})}>保存关联发现</button>
     </fieldset>}
     {c.finding_ids?.length > 0 && <p className="field-note">已绑定：{c.finding_ids.join("、")}</p>}
@@ -529,10 +697,28 @@ function CriterionCard({criterion: c, findings, busy, ranAsAgent, existingCandid
           ...(disposition === "accept_risk" ? {reason: reason.trim(), handled_by: handler.trim()} : {})})}>
         {disposition === "accept_risk" ? "记录风险决定" : "确认处置路径"}</button>
     </fieldset>}
-    {c.disposition === "add_tests" && canTaskAction(c, "propose_test") && <div className="closure-generate">
-      {ranAsAgent ? <button className="primary" disabled={!allowed("propose_test")}
-        onClick={() => void onAction("propose_test")}>生成并验证补测候选</button>
-        : <><p className="field-note">本次标准审查保持零模型调用。AI 补测需另建有模型授权的智能体审查。</p>
+    {c.disposition === "add_tests" && (canTaskAction(c, "propose_test") || actionCapability(c, "propose_test"))
+      && <div className="closure-generate">
+      {ranAsAgent ? <>
+        <button className="primary" disabled={!allowed("propose_test")}
+          onClick={() => void onAction("propose_test")}>生成并验证补测候选</button>
+        {(() => {
+          const capability = actionCapability(c, "propose_test");
+          if (!capability || capability.enabled) return null;
+          return <div className="closure-blocked" role="status">
+            <p className="closure-blocked-reason">{capability.reason
+              || "本次尚未授权生成补测候选。"}</p>
+            {capability.recovery === "configure_new_review" && <>
+              <button type="button" onClick={onNewAgentReview} disabled={busy}>创建带补测授权的新审查</button>
+              <p className="field-note">当前任务、已选发现与原证据保持不变；新审查不会改写本次已冻结的计划。</p>
+            </>}
+            {capability.recovery === "refresh" && <p className="field-note">
+              可点击上方「重新读取处置状态」后再试；配置恢复后会自动重新确认授权。</p>}
+            {capability.recovery === "retry" && <p className="field-note">
+              属于临时故障；稍后重试即可，已完成的验证记录不会丢失。</p>}
+          </div>;
+        })()}
+      </> : <><p className="field-note">本次标准审查保持零模型调用。AI 补测需另建有模型授权的智能体审查。</p>
           <button onClick={onNewAgentReview} disabled={busy}>配置新的智能体审查</button></>}
     </div>}
     {c.disposition === "controlled_repair" && !c.candidate && <p>
@@ -617,7 +803,8 @@ function CriterionCard({criterion: c, findings, busy, ranAsAgent, existingCandid
         <section><h5>原审查证据</h5><EvidenceRows rows={c.outcome.origin_rows || []} /></section>
         <section><h5>新版本证据</h5><EvidenceRows rows={c.outcome.followup_rows || []} /></section>
       </div></details> : null}
-    {busy && <p role="status">正在处理，请等待服务端结果。你可以稍后重新读取状态。</p>}
+    {actionError && <p className="closure-error closure-action-error" role="alert">{actionError}</p>}
+    {busy && <p role="status" aria-live="polite">正在处理，可能需要几十秒（生成与隔离验证最久）；请勿重复点击，完成后此处自动更新。</p>}
   </article>;
 }
 

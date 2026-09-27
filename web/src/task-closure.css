@@ -68,3 +68,34 @@
 .closure-delegation-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; }
 @media (max-width: 700px) { .closure-summary-row { grid-template-columns: 1fr; }
   .closure-delegation-facts { grid-template-columns: 1fr; } }
+
+/* U10：补测能力被授权闸关闭时，原因与恢复入口直接放在生成按钮旁，
+   不再让用户点击后才在面板顶部看到一条原始报错。 */
+.closure-blocked { margin: 10px 0 0; padding: 12px 14px; border-left: 3px solid var(--warn, #b8860b);
+  display: grid; gap: 8px; }
+.closure-blocked-reason { margin: 0; }
+.closure-blocked .field-note { margin: 0; }
+.closure-action-error { margin: 12px 0 0; }
+
+/* U02：验收要求建议区（Tab 采纳 / Esc 关闭 / 按钮入口）。 */
+.requirement-suggestion { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 8px 0 0; padding: 10px 12px; border: 1px dashed var(--line, #bbb);
+  border-radius: 8px; }
+.requirement-suggestion span { flex: 1 1 240px; }
+.requirement-suggestion small { color: var(--text-soft, #777); }
+.requirement-context { color: var(--text-soft, #777); font-weight: 400; }
+
+/* N03：发现按文件分组；非行为行折叠；推荐标记与上限提示。 */
+.closure-finding-group { margin: 10px 0; }
+.closure-finding-group h5 { margin: 6px 0; display: flex; gap: 8px; align-items: baseline; }
+.closure-finding-group h5 small { color: var(--text-soft, #777); font-weight: 400; }
+.closure-findings label.recommended > span { border-left: 2px solid var(--ok, #2e7d32);
+  padding-left: 6px; }
+.closure-findings .rec-mark { font-style: normal; margin-left: 6px;
+  padding: 1px 6px; border-radius: 6px; background: var(--ok-bg, #e8f5e9);
+  color: var(--ok-text, #2e7d32); font-size: 12px; }
+.closure-nonbehavior { margin-top: 6px; }
+.closure-nonbehavior summary { cursor: pointer; color: var(--text-soft, #777); }
+.closure-recommend { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 6px 0; padding: 8px 10px; border-left: 3px solid var(--ok, #2e7d32); }
+.closure-limit-warn { color: var(--danger-bright, #b3261e); margin-left: 6px; }

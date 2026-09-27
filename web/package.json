@@ -2,9 +2,8 @@
   "name": "shuimu-yanma-review-cockpit",
   "private": true,
   "author": "杨佩立（清华大学）",
-  "license": "Apache-2.0",
-  "version": "0.2.0",
-  "description": "Public web UI for the Shuimu Yanma v0.2 preview. The package remains private to prevent accidental npm publication and follows the repository Apache-2.0 license.",
+  "license": "UNLICENSED",
+  "version": "0.1.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

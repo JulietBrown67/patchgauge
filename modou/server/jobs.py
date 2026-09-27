@@ -171,7 +171,7 @@ class JobContext:
         self.round_id = round_id
         self.criterion_id = criterion_id
         self.currency = currency
-        # 作业体可核对“这份作业真的绑定了它声称的预算账本”。
+        # R1（08430cc 复核）：作业体可核对"这份作业真的绑定了它声称的预算账本"。
         self.budget_id = budget_id
         self.budget_reserved = budget_reserved
         # currency=units 时由作业体申报实际用量；seconds 由服务端计时。
@@ -209,7 +209,7 @@ class JobService:
     _CREATE_FIELDS = frozenset({"kind", "payload", "task_id", "round_id",
                                 "criterion_id", "dedupe_key", "budget_id",
                                 "repo_write_lock", "trigger_source"})
-    #: 服务内部作业类型：只能由拥有它的服务经授权预留事务投递，
+    #: 服务内部作业类型：只能由拥有它的服务经授权预留事务投递（R1 复核修正），
     #: HTTP /api/v2/jobs 一律拒绝；create() 仍供服务端代码使用。
     INTERNAL_KINDS = frozenset({"delegation_check"})
 
@@ -567,7 +567,7 @@ class JobService:
             _fail("JOB_REQUEST_INVALID",
                   "create requires kind (+payload); unknown fields rejected")
         kind = str(raw.get("kind") or "")
-        # 服务内部作业类型不接受 HTTP 直创。委托复验只能
+        # R1（08430cc 复核）：服务内部作业类型不接受 HTTP 直创。委托复验只能
         # 经 DelegationService.check 的授权预留事务投递——那里占用次数、绑定
         # 专属预算并登记快照身份；通用作业接口直创会绕过全部三项。
         if kind in self.INTERNAL_KINDS:

@@ -1,5 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="400" height="400">
+<!-- U01：深色板品牌徽章。括号保留浅色 #F4F0E7；钩子为品牌绿，取值与
+     web/src/styles.css 深色板 token --mark-check（#63d9ad）同源。
+     SVG 无法引用 CSS 变量，调整该 token 时须同步此处的十六进制值。
+     浅色板对应资产为 mark-onwhite.svg（--mark-check 浅色值 #1F9D6B）。 -->
 <path d="M 140.0,92.0 C 109.9,92.0 122.0,132.0 122.0,174.0 C 122.0,188.0 105.5,200.0 100.0,200.0 C 105.5,200.0 122.0,212.0 122.0,226.0 C 122.0,268.0 109.9,308.0 140.0,308.0" fill="none" stroke="#F4F0E7" stroke-width="24.8" stroke-linecap="round" stroke-linejoin="round"/>
 <path d="M 260.0,92.0 C 290.1,92.0 278.0,132.0 278.0,174.0 C 278.0,188.0 294.5,200.0 300.0,200.0 C 294.5,200.0 278.0,212.0 278.0,226.0 C 278.0,268.0 290.1,308.0 260.0,308.0" fill="none" stroke="#F4F0E7" stroke-width="24.8" stroke-linecap="round" stroke-linejoin="round"/>
-<path d="M 168,218 L 196,246 L 234,156" fill="none" stroke="#F4F0E7" stroke-width="23.6" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M 168,218 L 196,246 L 234,156" fill="none" stroke="#63d9ad" stroke-width="23.6" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

@@ -483,7 +483,9 @@ class SandboxedExecutor:
     def __init__(self, scratch: Path,
                  limits: ResourceLimits = DEFAULT_RESOURCE_LIMITS,
                  process_record: Path | None = None):
-        from tools.sandbox import launch
+        # 实现在 modou.sandbox（原 tools/sandbox/launch.py）：wheel 只打包
+        # modou*，跨包 import 会让安装后的沙箱模式 ImportError。
+        from modou import sandbox as launch
 
         if not launch.available():
             raise ExecutorUnavailable("sandbox-exec unavailable")
@@ -510,7 +512,7 @@ class SandboxedExecutor:
 
     def run(self, argv: list[str], *, cwd: Path, timeout: float,
             env: dict[str, str]) -> subprocess.CompletedProcess:
-        from tools.sandbox import launch
+        from modou import sandbox as launch
 
         child_env = dict(env)
         child_env.update({

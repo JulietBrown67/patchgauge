@@ -31,6 +31,7 @@ threshold and is switched off.  Only `disabled` forces `unavailable`.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -38,7 +39,26 @@ from pathlib import Path
 
 
 SCHEMA_VERSION = "modou-capability-registry-v1"
-DEFAULT_PATH = Path(__file__).resolve().parents[1] / "configs" / "capabilities.json"
+
+
+def _default_registry_path() -> Path:
+    """查找顺序：环境覆盖 → 源码树 configs/（历史事实源，测试与冻结清单指向它）
+    → 包内副本 modou/configs/（wheel 安装后源码树不存在，只有这份）。
+
+    两份副本的同一性由 tests/test_packaged_imports.py 逐字节钉住——这不是
+    缓存，是同一注册表的源码树/安装两个形态，改任何一份必须同步另一份。
+    """
+    override = os.environ.get("SHUIMU_YANMA_CAPABILITIES")
+    if override:
+        return Path(override)
+    here = Path(__file__).resolve()
+    repo_layout = here.parents[1] / "configs" / "capabilities.json"
+    if repo_layout.is_file():
+        return repo_layout
+    return here.parent / "configs" / "capabilities.json"
+
+
+DEFAULT_PATH = _default_registry_path()
 DOCUMENT_SUFFIXES = frozenset({".md", ".txt", ".html"})
 
 

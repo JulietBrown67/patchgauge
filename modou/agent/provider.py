@@ -471,6 +471,12 @@ class OpenAICompatibleProvider(ModelProvider):
         return self._request_json(system=revision_prompt_text(),
                                   user=prompt, stage="test-revision")
 
+    def chat_request(self, *, system: str, prompt: dict) -> dict:
+        """对话入口的受限通用调用：调用方自带系统提示与封闭 schema 校验，
+        这里只提供预算/指标管道。模型在对话里只做意图分类与措辞，
+        不签发任何承重/无据/游离结论——那是实验回执的职责。"""
+        return self._request_json(system=system, user=prompt, stage="chat")
+
 
 def coverage_first_order(anchors: tuple[str, ...], candidates,
                          focus: str = "evidence-boundary") -> tuple[tuple[str, ...], str]:

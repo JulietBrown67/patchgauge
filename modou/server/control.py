@@ -230,6 +230,8 @@ class ReviewPreset:
     goal: str
     budget_seconds: int
     model_provider: str
+    # U02：与案例配套的推荐验收要求；只作为建议展示，用户可改可不用。
+    recommended_criteria: tuple[str, ...] = ()
 
 
 class RepoRegistry:
@@ -317,6 +319,7 @@ class RepoRegistry:
             "goal": p.goal,
             "budget_seconds": p.budget_seconds,
             "model_provider": p.model_provider,
+            "recommended_criteria": list(p.recommended_criteria),
         } for p in self._presets]
 
     def _compile_presets(self, raw_presets: list[dict]) -> tuple[ReviewPreset, ...]:
@@ -330,7 +333,8 @@ class RepoRegistry:
         compiled: list[ReviewPreset] = []
         seen: set[str] = set()
         allowed = {"preset_id", "display_name", "description", "repo_name",
-                   "test_files", "goal", "budget_seconds", "model_provider"}
+                   "test_files", "goal", "budget_seconds", "model_provider",
+                   "recommended_criteria"}
         for raw in raw_presets:
             if not isinstance(raw, dict) or set(raw) - allowed:
                 raise IntakeError("PRESET_INVALID", "preset has unsupported fields")
@@ -347,6 +351,13 @@ class RepoRegistry:
             provider = str(raw.get("model_provider") or "deterministic")
             if not 1 <= budget <= 3600 or provider not in {"deterministic", "live"}:
                 raise IntakeError("PRESET_INVALID", "preset budget or provider is invalid")
+            criteria_raw = raw.get("recommended_criteria") or []
+            if (not isinstance(criteria_raw, list)
+                    or not all(isinstance(x, str) for x in criteria_raw)
+                    or len(criteria_raw) > 12
+                    or any(not x.strip() or len(x) > 200 for x in criteria_raw)):
+                raise IntakeError("PRESET_INVALID",
+                                  "recommended_criteria must be a list of short non-empty strings")
             compiled.append(ReviewPreset(
                 preset_id=preset_id,
                 display_name=str(raw.get("display_name") or preset_id)[:100],
@@ -356,6 +367,7 @@ class RepoRegistry:
                 goal=str(raw.get("goal") or "审查补丁新增代码的证据边界")[:500],
                 budget_seconds=budget,
                 model_provider=provider,
+                recommended_criteria=tuple(criteria_raw),
             ))
             seen.add(preset_id)
         return tuple(compiled)
@@ -4909,12 +4921,19 @@ class ReviewManager:
                 or self.provider is None):
             return {**base, "skipped_reason": "deterministic_run"}
         self._gate_model_path(rt, "recommendation")
+        # N09：行文本属于 selected_snippets 数据类别，与补测提案共用同一
+        # 授权口径；未授权时只发送行号引用与标签（diff_summary 口径）。
+        # spec 恢复失败时保守按未授权处理，不因缺记录而扩权。
+        recommend_spec = self._review_spec(rt)
+        include_snippets = bool(
+            recommend_spec is not None
+            and "selected_snippets" in recommend_spec.data_policy.model_data_categories)
         report = _read_json(bundle_dir / "report.json")
         lines = ((report.get("render_model") or {}).get("lines") or [])
         rows = ledger_store.read(bundle_dir / ledger_store.FILENAME)
         built = build_input(goal=str(rt.request.get("goal") or ""),
                             stop_reason=stop_reason, lines=lines,
-                            evidence_rows=rows)
+                            evidence_rows=rows, include_snippets=include_snippets)
         if not built["allowed"]["evidence_ids"] or not built["allowed"]["line_refs"]:
             return {**base, "skipped_reason": "no_relevant_evidence"}
         last_error = ""

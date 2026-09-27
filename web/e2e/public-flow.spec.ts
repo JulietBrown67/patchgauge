@@ -35,10 +35,10 @@ test("the public flow waits for approval and shows a named regression", async ({
   await page.getByRole("button", {name: "运行这个演示案例"}).click();
   const approve = page.getByRole("button", {name: "确认计划并开始审查"});
   await expect(approve).toBeVisible({timeout: 60_000});
-  await expect(page.getByLabel("结果概览")).toHaveCount(0);
+  await expect(page.getByLabel("结果总览")).toHaveCount(0);
   await approve.click();
 
-  const overview = page.getByLabel("结果概览");
+  const overview = page.getByLabel("结果总览");
   await expect(overview).toBeVisible({timeout: 150_000});
   await expect(overview).toContainText("新增行");
   await expect(overview).toContainText("tests/test_calc.py::test_scaled");

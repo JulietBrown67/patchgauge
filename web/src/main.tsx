@@ -4,13 +4,18 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import { RepoCombobox } from "./RepoCombobox";
 import {TaskClosure, TaskRequirementsCard, taskRequirements, taskLink, type EvidenceTask} from "./TaskClosure";
+import {customIntent, draftKey, presetIntent, recommendedText, switchPresetDraft,
+  type IntentDrafts, type PresetContract} from "./review-intent";
 import {OfficialLockup, OfficialMark} from "./OfficialBrand";
 import {
   COMMON_UNCOVERED, SESSION_REVIEW_KEY, SESSION_TOKEN_KEY, classifyError, eventLabel,
   eventPresentation,
   linePresentation, normalizePastedToken, reasonLabel, resolveStartupToken,
   schedulingDetail, statusView, summarySentence, decisiveEvidenceId, emphasizeNumbers,
-  experimentStory, verdictCounts, minimizationViews, laneEvents, workspacePresentation,
+  traceableStory, verdictCounts, minimizationViews, laneEvents, workspacePresentation,
+  dataCategoryLabels, snippetsAuthorized,
+  historyGroups, historyEntryTitle, historyEntryTime, filterHistoryEntries,
+  REVIEW_STATUS_LABELS, type HistoryEntry,
   modeLabels, capabilityAvailable, capabilityTone, groupCapabilities, modelParticipation,
   modelConclusion, modelDecisionStages, evidencePassport, repairStatusView, autonomyView,
   modelLabel, offlineReplayNotice,
@@ -21,7 +26,7 @@ import {
   unenforcedLimitsView,
   standingAuthorizationView, normalizeEvalReceiptIndex, normalizeEvalReceipt,
   type StandingAuthorizationView, type EvalReceiptIndexEntry, type EvalReceiptView,
-  memoryRuleViews, MEMORY_CARD_HEADLINE, MEMORY_STATUS_LABELS, memoryKindOptions,
+  memoryRuleViews, MEMORY_STATUS_LABELS, memoryKindOptions, memoryHeadline, memoryKindHelp,
   dispositionOptions, DISPOSITION_BOUNDARY,
   planRevisionViews, PLAN_REVISION_BOUNDARY, type PlanRevisionView,
   type Capability, type DraftPayload, type UiNotice, type WorkspaceFocus,
@@ -42,6 +47,7 @@ import {testsForEvidence, type FocusTarget, type SourceFile, type SourceTree}
 import type {CommentList, CommentRecord} from "./workbench/comments";
 import type {ReverificationList, ReverificationRecord}
   from "./workbench/reverification";
+import {ChatRoute} from "./chat/ChatPage";
 
 // 证据工作台整块懒加载：不点"打开代码工作台"，Monaco 主包、语言与
 // worker 都不会进浏览器。
@@ -57,7 +63,7 @@ type LocatePayload = {schema_version: string; searched_repos: string[];
   draft?: LocateDraft; note?: string; reason?: string};
 type Preset = {preset_id: string; display_name: string; description: string;
   repo_id: string; test_files: string[]; goal: string; budget_seconds: number;
-  model_provider: string};
+  model_provider: string; recommended_criteria?: string[]};
 type EventRecord = {
   schema_version: string; review_id: string; event_id: string; seq: number;
   kind: string; occurred_at: string; data: Record<string, unknown>;
@@ -243,6 +249,7 @@ type WorkbenchSnapshot = {
   provider: string;
   probeStrategy: string;
   allowRepairBranch: boolean;
+  allowSnippets: boolean;
   repairPatch: string;
   lastEvent: string;
   resultScrollTop: number;
@@ -595,11 +602,10 @@ function PlanRevisionThread({views, open, onOpen, instruction, onInstruction,
 //   - 答案是**封闭词表**（与后端 _DISPOSITION_ANSWERS 同源），不给自由输入；
 //   - 留痕是审计通道，不改变审查状态。这句话常驻在表单上，否则人会以为点完
 //     它就会接着跑。
-function DispositionPanel({event, recorded, answer, onAnswer, handler, onHandler,
+function DispositionPanel({event, recorded, answer, onAnswer,
                            note, onNote, busy, canSubmit, onSubmit}: {
   event: EventRecord; recorded: Disposition[];
   answer: string; onAnswer: (v: string) => void;
-  handler: string; onHandler: (v: string) => void;
   note: string; onNote: (v: string) => void;
   busy: boolean; canSubmit: boolean; onSubmit: () => void;
 }) {
@@ -623,14 +629,11 @@ function DispositionPanel({event, recorded, answer, onAnswer, handler, onHandler
           className={answer === option.value ? "active" : ""}
           onClick={() => onAnswer(option.value)}>{option.label}</button>)}
       </div>
-      <label htmlFor="disposition-handler">处理人</label>
-      <input id="disposition-handler" value={handler} maxLength={100}
-        placeholder="谁做的这个决定" onChange={e => onHandler(e.target.value)} />
       <label htmlFor="disposition-note">备注（可选）</label>
       <input id="disposition-note" value={note} maxLength={500}
         placeholder="为什么这么决定" onChange={e => onNote(e.target.value)} />
       <button type="button" className="disposition-submit"
-        disabled={busy || !answer || !handler.trim()} onClick={onSubmit}>
+        disabled={busy || !answer} onClick={onSubmit}>
         {busy ? "留痕中…" : "记下这个决定"}</button>
     </> : <p className="disposition-offline">离线回放里没有可写入的审查，无法留痕。</p>)}
     <small className="disposition-boundary">{DISPOSITION_BOUNDARY}</small>
@@ -693,16 +696,20 @@ function MemoryRulesCard({rules, repoId, writable}: {
   const [kind, setKind] = useState("review_preference");
   const [rule, setRule] = useState("");
   const [appliesTo, setAppliesTo] = useState("");
-  const [handler, setHandler] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  // U04：操作者不再手填。本地单用户部署没有实名身份系统，如实记
+  // 「本地操作者」并保留服务端审计事件，不伪装实名认证。
+  const operator = "本地操作者";
+  // N04：本会话保存过的规则属于下一次审查；本轮加载的快照不变。
+  const [savedThisSession, setSavedThisSession] = useState(false);
   if (!localRules.length && !writable) return null;
   const applyExport = (payload: {records?: unknown}) => {
     dirtyRef.current = true;
     setLocalRules(memoryRuleViews(payload.records));
   };
   const remember = async () => {
-    if (busy || !repoId || !rule.trim() || !handler.trim()) return;
+    if (busy || !repoId || !rule.trim()) return;
     setBusy(true); setNotice("");
     try {
       const payload = await api<{records?: unknown}>(
@@ -711,12 +718,13 @@ function MemoryRulesCard({rules, repoId, writable}: {
           body: JSON.stringify({
             kind, rule: rule.trim(),
             applies_to: appliesTo.split(/[,，\s]+/).map(item => item.trim()).filter(Boolean),
-            confirmed_by: handler.trim(),
+            confirmed_by: operator,
           }),
         });
       applyExport(payload);
       setRule(""); setAppliesTo("");
-      setNotice("已记住。下次审查这份规则自动生效。");
+      setSavedThisSession(true);
+      setNotice("已记住。这份规则供下次审查使用；本轮计划已冻结，加载的仍是原快照。");
     } catch (error) {
       setNotice(noticeFor(error).message);
     } finally {
@@ -725,13 +733,12 @@ function MemoryRulesCard({rules, repoId, writable}: {
   };
   const revoke = async (memoryId: string) => {
     if (busy || !repoId) return;
-    if (!handler.trim()) { setNotice("撤销前先填处理人：规则变动要留痕到人。"); return; }
     setBusy(true); setNotice("");
     try {
       const payload = await api<{records?: unknown}>(
         `/api/v2/repos/${encodeURIComponent(repoId)}/memory/${encodeURIComponent(memoryId)}`, {
           method: "PATCH",
-          body: JSON.stringify({status: "revoked", confirmed_by: handler.trim()}),
+          body: JSON.stringify({status: "revoked", confirmed_by: operator}),
         });
       applyExport(payload);
       setNotice("已撤销。这条规则下次审查不再生效。");
@@ -741,8 +748,11 @@ function MemoryRulesCard({rules, repoId, writable}: {
       setBusy(false);
     }
   };
+  const activeCount = localRules.filter(item => item.status === "active").length;
   return <div className="memory-card" aria-label="仓库审查记忆">
-    <h4>{MEMORY_CARD_HEADLINE}</h4>
+    <h4>{memoryHeadline({activeCount, savedThisSession})}</h4>
+    {!savedThisSession && <small className="memory-snapshot-note">
+      本轮加载快照：{activeCount} 条生效规则；现在保存的规则供下次审查使用。</small>}
     <ul>{localRules.map(item => <li key={item.memory_id}>
       <b>{item.kind}</b>
       <span>{item.rule}</span>
@@ -754,14 +764,15 @@ function MemoryRulesCard({rules, repoId, writable}: {
         onClick={() => void revoke(item.memory_id)}>撤销</button>}
     </li>)}</ul>
     {writable && <div className="memory-form">
-      <label htmlFor="memory-handler">处理人</label>
-      <input id="memory-handler" value={handler} maxLength={100}
-        placeholder="谁在确认或撤销规则" onChange={e => setHandler(e.target.value)} />
       <label htmlFor="memory-kind">类型</label>
       <select id="memory-kind" value={kind} onChange={e => setKind(e.target.value)}>
         {memoryKindOptions().map(option =>
           <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
+      {(() => {const help = memoryKindHelp(kind);
+        return help.hint ? <p className="field-note memory-kind-help">
+          {help.hint} 例：{help.example}</p> : null;})()}
+      <p className="field-note">确认与撤销以「{operator}」留痕到服务端审计事件。</p>
       <label htmlFor="memory-rule">规则内容（最多 500 字）</label>
       <input id="memory-rule" value={rule} maxLength={500}
         placeholder="例如：tests/ 下的夹具一律用小写状态字面量"
@@ -770,7 +781,7 @@ function MemoryRulesCard({rules, repoId, writable}: {
       <input id="memory-applies" value={appliesTo} maxLength={400}
         placeholder="例如：modou/agent, web/src" onChange={e => setAppliesTo(e.target.value)} />
       <button type="button" className="memory-submit"
-        disabled={busy || !rule.trim() || !handler.trim()}
+        disabled={busy || !rule.trim()}
         onClick={() => void remember()}>{busy ? "保存中…" : "记住这条规则"}</button>
     </div>}
     {notice && <small className="memory-notice" role="status">{notice}</small>}
@@ -1017,6 +1028,9 @@ function App() {
   const [provider, setProvider] = useState("deterministic");
   const [probeStrategy, setProbeStrategy] = useState("hdd_inspired");
   const [allowRepairBranch, setAllowRepairBranch] = useState(false);
+  // N09/U10：所选代码片段外发是独立授权（selected_snippets），与修复分支
+  // 分开勾选；不勾选时建议阶段只发行号引用与标签，补测候选不可用。
+  const [allowSnippets, setAllowSnippets] = useState(false);
   const [repairPatch, setRepairPatch] = useState("");
   const [repairBusy, setRepairBusy] = useState(false);
   const [testProposal, setTestProposal] = useState<TestProposalStatus | null>(null);
@@ -1077,6 +1091,8 @@ function App() {
   const [receiptSelectedId, setReceiptSelectedId] = useState("");
   const [review, setReview] = useState<Review | null>(null);
   const [taskRequirementDraft, setTaskRequirementDraft] = useState("");
+  // U02：验收要求按案例保存；切换案例先存旧草稿再载新草稿，不静默覆盖。
+  const [intentDrafts, setIntentDrafts] = useState<IntentDrafts>({});
   const [preferredTaskId, setPreferredTaskId] = useState(initialTaskId);
   const [reviewBundle, setReviewBundle] = useState<ReviewBundle | null>(null);
   const [modelCalls, setModelCalls] = useState<ModelCall[]>([]);
@@ -1086,7 +1102,7 @@ function App() {
   const [evidenceDetail, setEvidenceDetail] = useState<Record<string, unknown> | null>(null);
   const [dispositions, setDispositions] = useState<Disposition[]>([]);
   const [dispositionAnswer, setDispositionAnswer] = useState("");
-  const [dispositionHandler, setDispositionHandler] = useState("");
+
   const [dispositionNote, setDispositionNote] = useState("");
   const [dispositionBusy, setDispositionBusy] = useState(false);
   const [decisionBusy, setDecisionBusy] = useState(false);
@@ -1482,6 +1498,21 @@ function App() {
     } catch { return []; }
   });
   const historyMenuRef = useRef<HTMLDetailsElement | null>(null);
+  // U03：历史元数据来自服务端（跨标签页、重启后仍在）；旧服务端没有
+  // 该接口时回退到本标签页 id 列表，不冒充。
+  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[] | null>(null);
+  const [historyQuery, setHistoryQuery] = useState("");
+  // U11：导航区分“可查看／已查看”。进入过第 5 步只代表看过证据，
+  // 不等于核验完成；第 6 步更不会因为被进入而替第 5 步打勾。
+  const [visitedStages, setVisitedStages] = useState<number[]>(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem("modou.session.visited_stages") || "null") as
+        {review_id?: unknown; stages?: unknown} | null;
+      return Array.isArray(saved?.stages)
+        ? (saved.stages as unknown[]).filter((x): x is number => Number.isInteger(x))
+        : [];
+    } catch { return []; }
+  });
   const [activeStage, setActiveStage] = useState(() => {
     try {
       const saved = JSON.parse(sessionStorage.getItem(SESSION_STAGE_KEY) || "null") as
@@ -1492,6 +1523,34 @@ function App() {
     } catch { return 0; }
   });
   const reviewStatusValue = review?.state.status || "";
+  // U11：第 6 步导航状态来自真实任务回执（TaskClosure 上报），不是
+  // “审查结束即处置完成”。none=尚未处置 pending=处理中 done=已有结论
+  // gap=仍有缺口。
+  const [closurePulse, setClosurePulse] = useState<"none" | "pending" | "done" | "gap">("none");
+  // N05：质疑相状态来自真实复验记录，不再复用实验相。
+  const [reverificationSummary, setReverificationSummary] = useState<{
+    total: number; open: number; replaying: number; settled: number; failed: number} | null>(null);
+  useEffect(() => {
+    if (!review || !terminal.has(review.state.status) || offlineReplay) {
+      setReverificationSummary(null); return;
+    }
+    let live = true;
+    void api<{reverifications?: Array<{status?: unknown}>}>(
+      `/api/v2/reviews/${encodeURIComponent(review.review_id)}/reverifications`)
+      .then(data => {
+        if (!live) return;
+        const rows = (data.reverifications || []).map(row => String(row.status || ""));
+        setReverificationSummary({
+          total: rows.length,
+          open: rows.filter(x => x === "planned" || x === "approved").length,
+          replaying: rows.filter(x => x === "replaying").length,
+          settled: rows.filter(x => x === "settled").length,
+          failed: rows.filter(x => x === "failed" || x === "rejected").length,
+        });
+      })
+      .catch(() => { if (live) setReverificationSummary(null); });
+    return () => {live = false;};
+  }, [review?.review_id, reviewStatusValue, offlineReplay]);
   const showJourney = presentation.showCurrentResult;
   const journeyPhase = !review || !showJourney ? "setup"
     : reviewStatusValue === "AWAITING_APPROVAL" ? "awaiting"
@@ -1505,27 +1564,68 @@ function App() {
         : "active",
     !review || !terminal.has(reviewStatusValue) ? "waiting"
       : ["FAILED", "ABORTED"].includes(reviewStatusValue) ? "error" : "done",
-    diffLines.length > 0 ? "ready" : "waiting",
-    review && terminal.has(reviewStatusValue) && !offlineReplay ? "ready" : "waiting",
+    // U11：第 5 步区分可查看/已查看——进入过才算已查看，且只代表看过。
+    diffLines.length > 0 ? (visitedStages.includes(4) ? "done" : "ready") : "waiting",
+    // 第 6 步依据任务回执：没有结论不得显示完成。
+    closurePulse === "done" ? "done"
+      : closurePulse === "gap" ? "error"
+      : closurePulse === "pending" ? "active"
+      : review && terminal.has(reviewStatusValue) && !offlineReplay ? "ready" : "waiting",
   ];
+  // 每步的诚实文案：导航词汇按步覆盖，避免全局词表把“已查看”说成
+  // “已完成”、把“处置进行中”说成“就绪”。
+  const stageStateLabels: string[] = stageStatuses.map((state, index) => {
+    if (index === 4) return state === "done" ? "已查看" : "可查看";
+    if (index === 5) return state === "done" ? "已有结论"
+      : state === "error" ? "仍有缺口" : state === "active" ? "处置进行中"
+      : state === "ready" ? "待处置" : "未开始";
+    return STAGE_STATE_LABELS[state];
+  });
   // 任务面板相状态：从旅程状态推导。02/03 都跟随实验相（质疑实验就发生
   // 在实验段里）；05 只走到"就绪"——确认永远是用户自己的动作。
+  // N05：03 质疑相不再复用实验相状态。质疑记录是唯一事实来源：
+  // 没有记录＝可选未发起；有记录看 open/replaying/settled/failed。
+  const challengePhase = (() => {
+    if (reverificationSummary && reverificationSummary.total > 0) {
+      if (reverificationSummary.replaying > 0) return {state: "active" as StageState, label: "复验中"};
+      if (reverificationSummary.open > 0) return {state: "active" as StageState, label: "待回应"};
+      if (reverificationSummary.failed > 0) return {state: "error" as StageState, label: "复验失败"};
+      return {state: "done" as StageState, label: "质疑已完成"};
+    }
+    if (reverificationSummary && reverificationSummary.total === 0
+        && terminal.has(reviewStatusValue)) {
+      return {state: "ready" as StageState, label: "可选，未发起"};
+    }
+    return {state: stageStatuses[2], label: STAGE_STATE_LABELS[stageStatuses[2]]};
+  })();
   const pulseStates: StageState[] = [
-    stageStatuses[1], stageStatuses[2], stageStatuses[2], stageStatuses[3],
+    stageStatuses[1], stageStatuses[2], challengePhase.state, stageStatuses[3],
     stageStatuses[4],
+  ];
+  const pulseLabels: string[] = [
+    STAGE_STATE_LABELS[pulseStates[0]], STAGE_STATE_LABELS[pulseStates[1]],
+    challengePhase.label, STAGE_STATE_LABELS[pulseStates[3]],
+    STAGE_STATE_LABELS[pulseStates[4]],
   ];
   const goToStage = (index: number, manual = true) => {
     const next = Math.max(0, Math.min(JOURNEY_STAGES.length - 1, index));
     setActiveStage(next);
+    setVisitedStages(old => old.includes(next) ? old : [...old, next]);
     // 默认自动跟随；但手动浏览时不应被旧审查的异步状态抢回原页。
     // 新审查创建和计划确认会自动恢复跟随，无需用户操作开关。
     const nextFollow = !manual;
     manualNavigationRef.current = manual;
     updateAutoFollow(nextFollow);
     try {
-      if (review?.review_id) sessionStorage.setItem(SESSION_STAGE_KEY, JSON.stringify({
-        review_id: review.review_id, stage: next, auto_follow: nextFollow,
-      }));
+      if (review?.review_id) {
+        sessionStorage.setItem(SESSION_STAGE_KEY, JSON.stringify({
+          review_id: review.review_id, stage: next, auto_follow: nextFollow,
+        }));
+        sessionStorage.setItem("modou.session.visited_stages", JSON.stringify({
+          review_id: review.review_id,
+          stages: visitedStages.includes(next) ? visitedStages : [...visitedStages, next],
+        }));
+      }
     } catch { /* private mode */ }
     window.scrollTo({top: 0, behavior: "auto"});
   };
@@ -1535,6 +1635,14 @@ function App() {
       const saved = JSON.parse(sessionStorage.getItem(SESSION_STAGE_KEY) || "null") as
         {review_id?: unknown; stage?: unknown; auto_follow?: unknown} | null;
       if (saved?.review_id !== review.review_id) return;
+      const visited = JSON.parse(sessionStorage.getItem("modou.session.visited_stages") || "null") as
+        {review_id?: unknown; stages?: unknown} | null;
+      if (visited?.review_id === review.review_id && Array.isArray(visited.stages)) {
+        setVisitedStages((visited.stages as unknown[])
+          .filter((x): x is number => Number.isInteger(x)));
+      } else {
+        setVisitedStages([]);
+      }
       // 服务恢复可能晚于用户手动点 01；此时旧缓存不能盖掉刚选的页面。
       if (manualNavigationRef.current) return;
       const stage = Number(saved.stage);
@@ -1550,7 +1658,12 @@ function App() {
     const onNavKey = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
-      if (target?.closest("input, textarea, select, [contenteditable='true']")) return;
+      // N10：输入控件与原生交互元素（按钮、链接、折叠摘要、单选复选）
+      // 都不抢键——焦点在“下一步”按钮上按 Enter 必须激活按钮，
+      // 不能被全局监听改写成“打开证据抽屉”。
+      if (target?.closest("input, textarea, select, [contenteditable='true'], "
+        + "button, a, summary, [role='button'], [role='radio'], [role='checkbox'], "
+        + "[role='option'], [role='tab']")) return;
       if (event.key === "Escape") {
         if (selectedLine || selected) {
           event.preventDefault(); setSelectedLine(null); setSelected(null);
@@ -1712,22 +1825,25 @@ function App() {
   const proposalRecord = testProposal?.proposal || null;
   const proposalView = visaStatusView(proposalRecord?.status || testProposal?.status);
   const proposalVisa = (proposalRecord?.visa || null) as Record<string, unknown> | null;
-  const storyEvent = (key: string): EventRecord | undefined => {
-    if (key === "baseline") return events.find(event => event.kind === "baseline.completed"
-      || event.kind === "baseline.failed" || event.kind === "baseline.started");
-    if (key === "remove") return events.find(event => event.kind === "probe.completed"
-      || event.kind === "probe.failed" || event.kind === "probe.started");
-    if (key === "regression") return events.find(event => event.kind === "observation.recorded"
-      && Array.isArray(event.data?.regressed_tests)
-      && (event.data.regressed_tests as unknown[]).length > 0)
-      || events.find(event => event.kind === "probe.completed");
-    return events.find(event => event.kind === "restore.verified"
-      || event.kind === "restore.completed" || event.kind === "restore.started");
-  };
+  // N01：故事四帧由同一张单元证书派生（traceableStory），点击跳转用每帧
+  // 自己的 eventId，不再独立取“全局第一个同类事件”——那会把别的实验
+  // 的事件当成这一帧的证据打开。
   const experimentStages = useMemo(
-    () => experimentStory(events, report?.certificates || []),
+    () => traceableStory(events, report?.certificates || []).steps,
     [events, report?.certificates],
   );
+  const storyEventById = (eventId: string | null): EventRecord | undefined =>
+    eventId ? events.find(event => event.event_id === eventId) : undefined;
+
+  useEffect(() => {
+    if (!sessionToken || historyEntries !== null) return;
+    let live = true;
+    void api<{reviews?: HistoryEntry[]}>("/api/v2/reviews/history?limit=50")
+      .then(data => {if (live) setHistoryEntries(Array.isArray(data?.reviews) ? data.reviews : []);})
+      .catch(() => {if (live) setHistoryEntries(null);});
+    return () => {live = false;};
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionToken, review?.review_id]);
 
   async function applyManualToken() {
     const token = normalizePastedToken(tokenInput);
@@ -1739,6 +1855,12 @@ function App() {
     sessionStorage.setItem(SESSION_TOKEN_KEY, token);
     setTokenInput("");
     await loadConfiguration();
+    // N07：任务链接在新标签页打开时缺连接。这里恢复连接后自动回到
+    // 链接指向的任务，不需要用户再手动找一次。
+    const linkedTask = new URLSearchParams(location.hash.slice(1)).get("task") || "";
+    if (linkedTask && !error) {
+      try { await openTaskLink(linkedTask); } catch { /* 任务读取失败时保留普通错误提示 */ }
+    }
   }
 
   async function reloadPlan() {
@@ -1821,7 +1943,7 @@ function App() {
       review, reviewBundle, events: [...events], selected, selectedLine, evidenceDetail,
       replayEvidence: {...replayEvidence}, diffLines: [...diffLines], error, offlineReplay,
       workspaceFocus, productMode, presetId, repoId, tests, goal, goalPreset, budget,
-      provider, probeStrategy, allowRepairBranch, repairPatch, lastEvent: lastEvent.current,
+      provider, probeStrategy, allowRepairBranch, allowSnippets, repairPatch, lastEvent: lastEvent.current,
       resultScrollTop: workspaceFocus === "current_result" ? window.scrollY : resultScrollTop.current,
       activeStage, autoFollow, timelineExpanded,
     };
@@ -1861,7 +1983,8 @@ function App() {
     setPresetId(snapshot.presetId); setRepoId(snapshot.repoId); setTests(snapshot.tests);
     setGoal(snapshot.goal); setGoalPreset(snapshot.goalPreset); setBudget(snapshot.budget);
     setProvider(snapshot.provider); setProbeStrategy(snapshot.probeStrategy);
-    setAllowRepairBranch(snapshot.allowRepairBranch); setRepairPatch(snapshot.repairPatch);
+    setAllowRepairBranch(snapshot.allowRepairBranch); setAllowSnippets(snapshot.allowSnippets);
+    setRepairPatch(snapshot.repairPatch);
     manualNavigationRef.current = !snapshot.autoFollow;
     setActiveStage(snapshot.activeStage); updateAutoFollow(snapshot.autoFollow);
     setTimelineExpanded(snapshot.timelineExpanded);
@@ -1899,8 +2022,16 @@ function App() {
   }
 
   function changePreset(nextPresetId: string) {
-    if (configLocked) return;
+    if (configLocked || nextPresetId === presetId) return;
     if (review && terminal.has(review.state.status)) enterNextRunSetup();
+    // U02：切案例＝换目标对象。旧案例的手改要求记在它名下；新案例先取
+    // 自己的草稿，没有才用推荐要求，避免成绩单的要求跟着抢课走。
+    const nextPreset = presets.find(item => item.preset_id === nextPresetId);
+    const fromKey = presetId || draftKey({source: "custom"});
+    const swapped = switchPresetDraft({drafts: intentDrafts, fromKey,
+      toKey: nextPresetId, currentDraft: taskRequirementDraft});
+    setIntentDrafts(swapped.drafts);
+    setTaskRequirementDraft(swapped.nextDraft);
     setPresetId(nextPresetId);
   }
 
@@ -1926,15 +2057,22 @@ function App() {
 
   async function createReview(preset?: Preset) {
     setError(null); setBusy(true); setEvents([]); setDiffLines([]); setReviewBundle(null); setModelCalls([]);
+    setVisitedStages([]); setClosurePulse("none");
     setSelected(null); setEvidenceDetail(null); setOfflineReplay(false); lastEvent.current = "";
     const requestRepo = preset?.repo_id || repoId;
     const requestTests = preset?.test_files || tests.split("\n").map(x => x.trim()).filter(Boolean);
+    // N06：一次审查只有一个目标对象。演示案例与自定义入口在此汇成同一个
+    // ReviewIntent；指令、验收项、任务标题都从它派生，运行前摘要与实际
+    // 请求不可能各说各话。
+    const intent = preset
+      ? presetIntent(preset as PresetContract, taskRequirementDraft)
+      : customIntent(goal, taskRequirementDraft);
     try {
       const next = await api<Review>("/api/v2/reviews", {
         method: "POST",
         headers: {"Idempotency-Key": requestKey("review")},
         body: JSON.stringify({
-          instruction: preset?.goal || goal,
+          instruction: intent.instruction,
           source: {kind: "local", repo_id: requestRepo},
           scope: {
             ...(scopeInclude.length ? {include: scopeInclude} : {}),
@@ -1943,6 +2081,8 @@ function App() {
           constraints: {budget_seconds: preset?.budget_seconds || budget},
           autonomy_policy: {model_provider: provider, allow_repair_branch: allowRepairBranch,
                             allow_generated_tests: false},
+          ...(productMode === "agent" && allowSnippets ? {data_policy: {
+            model_data_categories: ["metadata", "diff_summary", "test_facts", "selected_snippets"]}} : {}),
           review_focus: preset
             ? focusForGoalText(preset.goal, goalPreset)
             : (focusOverride || focusForGoalText(goal, goalPreset)),
@@ -1967,7 +2107,7 @@ function App() {
           const task = await api<EvidenceTask>("/api/v2/tasks", {
             method: "POST", headers: {"Idempotency-Key": requestKey("task")},
             body: JSON.stringify({review_id: next.review_id,
-              title: preset?.goal || goal, criteria: taskRequirements(taskRequirementDraft)}),
+              title: intent.title, criteria: intent.criteria}),
           });
           setPreferredTaskId(task.task_id);
         } catch (taskError) {
@@ -2135,20 +2275,20 @@ function App() {
   }
 
   async function recordDisposition(event: EventRecord) {
-    if (!review || !dispositionAnswer || !dispositionHandler.trim()) return;
+    if (!review || !dispositionAnswer) return;
     setDispositionBusy(true); setError(null);
     try {
       // 入参恰好这几个键：后端多一个键就整条拒。note 为空时不发，而不是发空串。
       const payload: Record<string, string> = {
         event_id: event.event_id, answer: dispositionAnswer,
-        handled_by: dispositionHandler.trim(),
+        handled_by: "本地操作者",
       };
       if (dispositionNote.trim()) payload.note = dispositionNote.trim();
       await api<Disposition>(`/api/v2/reviews/${review.review_id}/dispositions`, {
         method: "POST", headers: {"Idempotency-Key": requestKey("disposition")},
         body: JSON.stringify(payload),
       });
-      setDispositionAnswer(""); setDispositionHandler(""); setDispositionNote("");
+      setDispositionAnswer(""); setDispositionNote("");
       await loadDispositions(review.review_id);
     } catch (e) { setError(noticeFor(e)); }
     finally { setDispositionBusy(false); }
@@ -2438,7 +2578,7 @@ function App() {
     manualNavigationRef.current = true;
     updateAutoFollow(false);
     setSelected(event); setSelectedLine(null); setEvidenceDetail(null);
-    setDispositionAnswer(""); setDispositionHandler(""); setDispositionNote("");
+    setDispositionAnswer(""); setDispositionNote("");
     if (review && dispositionOptions(event.kind).length) void loadDispositions(review.review_id);
     const id = String(event.data.claim_id || event.data.evidence_id || "");
     if (!id) return;
@@ -2544,16 +2684,39 @@ function App() {
             {modeSwitchLocked && <small className="mode-switch-note">
               {runInProgress ? "审查运行中 · 结束后可切换" : "操作进行中 · 稍后可切换"}</small>}
           </div>
-          {/* #45 历史审查入口：后端没有列出审查的接口，这里只列本标签页
-              里真正出现过的审查 id；列表为空时整个入口不出现。 */}
-          {reviewHistory.length > 0 && <details className="history-menu" ref={historyMenuRef}>
+          {/* U03 历史入口：服务端元数据（时间＋标题＋验收摘要＋状态）
+              按日期分组可搜索；旧服务端回退到本标签页 id 列表。 */}
+          {(historyEntries?.length || reviewHistory.length > 0) && <details className="history-menu" ref={historyMenuRef}>
             <summary title="只查看历史结果，不会重新运行代码或调用模型"
-              aria-label={`审查历史，本会话 ${reviewHistory.length} 条记录`}>审查历史</summary>
-            <div className="history-list">
+              aria-label={`审查历史，${historyEntries ? historyEntries.length : reviewHistory.length} 条记录`}>审查历史</summary>
+            {historyEntries ? <div className="history-list">
+              <input type="search" aria-label="按名称或验收要求搜索历史"
+                placeholder="搜索：案例名 / 验收要求" value={historyQuery}
+                onChange={e => setHistoryQuery(e.target.value)} />
+              {historyGroups(filterHistoryEntries(historyEntries, historyQuery)).map(group =>
+                <div key={group.key} className="history-group">
+                  <b>{group.label}</b>
+                  {group.entries.map(entry => <button key={entry.review_id} type="button"
+                    disabled={busy} onClick={() => void openHistoryReview(entry.review_id)}>
+                    <span className="history-entry-title">
+                      {(() => {const time = historyEntryTime(entry);
+                        return time ? time.toLocaleTimeString("zh-CN", {hour: "2-digit", minute: "2-digit"}) : "";})()}
+                      {" · "}{historyEntryTitle(entry)}</span>
+                    {entry.requirement_excerpt
+                      && <small>{String(entry.requirement_excerpt).slice(0, 40)}</small>}
+                    <small>{REVIEW_STATUS_LABELS[String(entry.review_status || "")]
+                      || String(entry.review_status || "状态未知")}</small>
+                    <code>{entry.review_id}</code>
+                  </button>)}
+                </div>)}
+              {filterHistoryEntries(historyEntries, historyQuery).length === 0
+                && <small>没有匹配的历史记录。</small>}
+              <small>只查看历史结果，不会重新运行代码或调用模型。</small>
+            </div> : <div className="history-list">
               {reviewHistory.map(id => <button key={id} type="button"
                 disabled={busy} onClick={() => void openHistoryReview(id)}>{id}</button>)}
-              <small>只查看历史结果，不会重新运行代码或调用模型</small>
-            </div>
+              <small>当前服务版本不提供历史元数据；仅列出本标签页出现过的审查。</small>
+            </div>}
           </details>}
           {review && <div className="workbench-actions">
             <button className="clear-workbench" disabled={!canClearWorkbench}
@@ -2605,7 +2768,7 @@ function App() {
         onClick={() => goToStage(index)}>
         <i aria-hidden="true" />
         <span className="stage-label">{String(index + 1).padStart(2, "0")} {rail.label}
-          <b> · {STAGE_STATE_LABELS[stageStatuses[index]]}</b></span>
+          <b> · {stageStateLabels[index]}</b></span>
       </button>)}
       <div className={`stage-follow ${autoFollow ? "is-on" : "is-paused"}`}
         role="status" aria-label={autoFollow ? "自动跟随已开启" : "正在手动查看，自动跟随已暂停"}
@@ -2690,7 +2853,9 @@ function App() {
           const uiProbe = uiProbeStatusView(releaseStatus.ui_probe_status);
           const narrowChecks = narrowPackageChecksView(releaseStatus.narrow_package_checks);
           const gateDetails = Object.entries(releaseStatus.pending_gate_details || {});
-          return <div className={`release-status-card ${tone}`} role="status" aria-label="发布状态">
+          return <details className={`release-status-card ${tone} tech-drawer`} aria-label="发布状态">
+          <summary>内部候选状态（技术）</summary>
+          <div role="status">
             <span>内部候选状态</span><strong>{view.headline}</strong>
             <small>{view.detail}</small>
             {view.state === "machine_failed" && view.machineFailureReasons.length === 0 &&
@@ -2717,7 +2882,8 @@ function App() {
               {view.state === "receipt_expired" && releaseStatus.serving_commit &&
                 <small>serving_commit: {releaseStatus.serving_commit}</small>}
             </details>
-          </div>;
+          </div>
+          </details>;
         })()}
         <div className={`standing-auth-card ${standingAuth.loaded ? (standingAuth.expired ? "expired" : "loaded") : "unloaded"}`}
           role="status" aria-label="常驻授权状态">
@@ -2755,6 +2921,9 @@ function App() {
         </details>}
       </div>
       {error.recovery === "token" && <div className="token-recovery">
+        {initialTaskId && <p className="token-recovery-target" role="note">
+          你打开的是一个任务链接（任务 <code>{initialTaskId}</code>），需要连接发起它的本地服务。
+          粘贴该服务的启动信息完成连接后，会自动回到这个任务；链接本身不含任何凭据，可以安全分享。</p>}
         <label htmlFor="manual-token">粘贴完整启动地址或本次 token</label>
         <div><input id="manual-token" type="password" value={tokenInput}
           onChange={e => setTokenInput(e.target.value)}
@@ -2766,67 +2935,6 @@ function App() {
       {error.recovery === "retry" && <button onClick={loadConfiguration}>重新连接服务</button>}
     </section>}
 
-    {activeStage === 3 && summary && presentation.showCurrentResult && <section className="result-overview" aria-label="结果概览">
-      <BoundaryLine agent={boundaryAgent}/>
-      <div className="result-counts">{verdictCounts(summary).map(item => {
-        const loadLine = item.key === "load" ? diffLines.find(line => line.label === "承重") : undefined;
-        return <button key={item.key} className={`metric metric-${item.key}`}
-          disabled={!loadLine} onClick={() => loadLine && inspectLine(loadLine)}
-          title={loadLine ? "打开一条承重结论的证据" : item.label}>
-          <span>{item.label}</span><strong>{item.value}</strong>
-        </button>;
-      })}</div>
-      {/* 「为什么相信它」单屏：三栏回答同一个问题——这个结论凭什么可信。
-          左：结论本身；中：实验因果链（点任何一帧都能落到原始证据）；
-          右：实验没有回答、要由人决定是否接受的问题。三栏数据全是
-          既有字段（thesis / experimentStory / 口径声明），没有新造口径。 */}
-      <div className="trust-grid" aria-label="为什么相信它">
-        <div className="trust-col trust-thesis">
-          <h3>结论</h3>
-          <p className="result-thesis">水木验码临时拿掉新增代码，观察哪个具名测试失败，再把代码恢复；结论来自可复验实验，不是模型直接猜测。</p>
-        </div>
-        <div className="trust-col trust-story">
-          <h3>实验因果链</h3>
-          <div className="experiment-story">{experimentStory(events, report?.certificates || []).map((stage, index) =>
-            <button key={stage.key} type="button" className={`story-stage story-${stage.key} story-${stage.state}`}
-              disabled={!storyEvent(stage.key)} onClick={() => {
-                const event = storyEvent(stage.key);
-                if (event) void inspectEvent(event);
-              }} title={storyEvent(stage.key) ? "打开对应证据事件" : "本帧尚无对应事件"}>
-              <span>{String(index + 1).padStart(2, "0")}</span><strong>{stage.label}</strong><small>{stage.detail}</small>
-            </button>)}</div>
-        </div>
-        <div className="trust-col trust-open">
-          <h3>未回答的问题与人工决定</h3>
-          <p className="trust-open-note">实验没有回答下面这些；是否采信结论，由人决定。</p>
-          <ul className="trust-uncovered">{uncovered.map((item, i) => <li key={i}>{item}</li>)}</ul>
-        </div>
-      </div>
-      {minimizationViews(summary && reviewBundle
-        ? (reviewBundle.evidence_bundle as Record<string, unknown> | undefined)?.report as
-          Record<string, unknown> | undefined
-        : null).length > 0 &&
-        <div className="minimization" aria-label="最小回归触发集合">
-          {minimizationViews(((reviewBundle?.evidence_bundle as Record<string, unknown>)
-            ?.report) as Record<string, unknown>).map(view =>
-            <div key={view.anchorId} className="minimization-row">
-              <strong>{view.anchorId}</strong>
-              {view.incompleteReason
-                ? <span className="minimization-none">{view.notApplicable
-                    ? `最小化不适用：${view.incompleteReason}（未消耗实验）`
-                    : `已尝试但未取得证书（${view.incompleteReason}）`}</span>
-                : <>
-                  <span>{view.frozenUnits} 条新增语句 → {view.minimalUnits} 条触发
-                    <code>{view.targetRegression}</code></span>
-                  <small>{view.removalChecks} 次逐一移除检查通过{view.oneMinimal ? "，已签发 1-minimal 证书" : ""}</small>
-                  <small className="scope-note">{view.scopeNote}</small>
-                </>}
-            </div>)}
-        </div>}
-      {review && diffLines.length > 0 && <button type="button" className="workbench-open result-workbench-open"
-        onClick={() => { goToStage(4); setWorkbenchOpen(true); }}>
-        打开代码工作台</button>}
-    </section>}
 
     {pendingDecision && review && !terminal.has(review.state.status)
       && <DecisionGate event={pendingDecision} busy={decisionBusy}
@@ -2836,7 +2944,10 @@ function App() {
       {activeStage === 0 && <aside className="panel intake">
         <div className="panel-title"><span>01</span><h3>选择审查对象</h3></div>
         <BoundaryLine agent={productMode === "agent"}/>
-        <TaskRequirementsCard value={taskRequirementDraft} onChange={setTaskRequirementDraft} disabled={configLocked || busy} />
+        <TaskRequirementsCard value={taskRequirementDraft} onChange={setTaskRequirementDraft}
+          disabled={configLocked || busy}
+          contextLabel={selectedPreset ? selectedPreset.display_name : "自定义审查"}
+          suggestion={selectedPreset ? recommendedText(selectedPreset as PresetContract) : null} />
         {visiblePresets.length > 0 && <>
             <label htmlFor="preset">准备好的演示案例</label>
             {productMode === "agent" && <p className="field-note preset-agent-note" role="note">
@@ -2847,6 +2958,9 @@ function App() {
             </select>
             <div className="preset-description">
               <p>{selectedPreset?.description}</p>
+              {selectedPreset && <p className="preset-goal"><strong>本次将验证：</strong>{selectedPreset.goal}</p>}
+              {selectedPreset && ((selectedPreset.recommended_criteria || []).length > 0)
+                && <p className="field-note">配套验收要求 {(selectedPreset.recommended_criteria || []).length} 项已填入上方输入框的建议区，可一键采用或修改。</p>}
               {selectedPreset && <div className="preset-meta">
                 <span>{selectedPresetRepo || "已授权演示仓库"}</span>
                 <span>{selectedPreset.test_files.length} 个测试文件</span>
@@ -3097,6 +3211,12 @@ function App() {
               <span>验证通过后允许创建本地修复分支</span>
             </label>
             <p className="field-note">这是显式授权：只接受你随后粘贴的封闭补丁，验证失败、快照过期或分支冲突时不会提交。</p>
+            {productMode === "agent" && <label className="permission-toggle" htmlFor="allow-snippets">
+              <input id="allow-snippets" type="checkbox" checked={allowSnippets}
+                disabled={configLocked} onChange={e => setAllowSnippets(e.target.checked)} />
+              <span>允许把所选新增代码片段发送给模型</span>
+            </label>}
+            {productMode === "agent" && <p className="field-note">两项授权相互独立：用于补测候选与更具体的只读建议；不勾选时建议阶段只发送行号引用与三态标签，补测候选不可用。默认不发送任何代码文本。</p>}
             <label htmlFor="probe-strategy">最小化策略</label>
             <select id="probe-strategy" value={probeStrategy} disabled={configLocked}
               onChange={e => setProbeStrategy(e.target.value)}>
@@ -3129,8 +3249,9 @@ function App() {
               <li>修改代码</li><li>commit 或 push</li>
             </ul></div>
           </div>
-          <p className="disclosure">建议阶段会向 {setupModelLabel} 发送最多 80 条、总计不超过 12KB
-            的相关新增代码行；确认计划即表示同意本次发送范围。</p>
+          <p className="disclosure">建议阶段会向 {setupModelLabel} 发送{allowSnippets
+            ? "最多 80 行、总计不超过 12KB 的相关新增代码行文本（本次已授权 selected_snippets）"
+            : "相关新增行的行号引用与三态标签（本次未授权发送代码文本）"}；确认计划即表示同意本次发送范围。</p>
           {presentation.showLiveSetupPlaceholder && <div className="setup-placeholder live-setup" role="status">
             <strong>尚未开始模型调用</strong>
             <span>创建并确认新的 Review 后，决策轨迹只由本轮真实事件推进。</span>
@@ -3206,8 +3327,7 @@ function App() {
               <div><dt>修改上限</dt><dd>最多 {String(activeScope.max_modified_files || 5)} 个文件 / {String(activeScope.max_changed_lines || 400)} 行</dd></div>
               <div><dt>网络与安装</dt><dd>{activeConstraints.allow_network === true ? "按计划允许受限网络" : "断网"} · {activeConstraints.allow_dependency_install === true ? "允许锁定依赖" : "不安装依赖"}</dd></div>
               <div><dt>模型预算</dt><dd>总 token ≤ {String(activeConstraints.max_total_tokens || 20000)} · 费用 ≤ ¥{(Number(activeConstraints.max_cost_cny_fen || 0) / 100).toFixed(2)}</dd></div>
-              <div><dt>将发送的数据</dt><dd>{Array.isArray(activeDataPolicy.model_data_categories)
-                ? (activeDataPolicy.model_data_categories as string[]).join(" · ") : "最小结构化事实"}；不发送私有源码全文</dd></div>
+              <div><dt>将发送的数据</dt><dd>{dataCategoryLabels(activeDataPolicy.model_data_categories)}；不发送私有源码全文</dd></div>
               <div><dt>输出</dt><dd>{activeOutputPolicy.review_bundle !== false ? "证据包" : ""} {activeOutputPolicy.human_report !== false ? "· 可读报告" : ""} {activeOutputPolicy.local_branch === true ? "· 本地分支与提交" : "· 不创建分支"}</dd></div>
               <div><dt>会再次询问</dt><dd>范围、预算、风险、网络、数据外发、依赖安装、HEAD 或工作区指纹发生实质变化</dd></div>
               <div><dt>明确未检查</dt><dd>{Array.isArray(activeScope.exclude) && activeScope.exclude.length
@@ -3224,7 +3344,9 @@ function App() {
                 ? review.plan.scope.length : 0} 项，运行中不得增删</dd></div>
               <div><dt>模型可执行动作</dt><dd>保持顺序 · 有限重排 · 合法停止</dd></div>
               <div><dt>将发送的数据范围</dt><dd>结构化目标、预算、候选摘要、最新观测；
-                建议阶段另发最多 80 行 / 12KB 相关新增代码</dd></div>
+                {snippetsAuthorized(activeDataPolicy.model_data_categories)
+                  ? "建议阶段另发最多 80 行 / 12KB 相关新增代码行文本（已授权 selected_snippets）"
+                  : "建议阶段只发送行号引用与三态标签，不发送代码文本（未授权 selected_snippets）"}</dd></div>
               <div><dt>人工确认状态</dt><dd>{review.state.status === "AWAITING_APPROVAL"
                 ? "等待确认" : "已确认"}</dd></div>
               <div><dt>计划来源</dt><dd>{planSource}</dd></div>
@@ -3309,8 +3431,8 @@ function App() {
         {!timelineExpanded ? <div className="timeline-summary" aria-label="四步实验摘要">
           {experimentStages.map(stage => <button key={stage.key} type="button"
             className={`timeline-summary-step story-${stage.state}`}
-            disabled={!storyEvent(stage.key)}
-            onClick={() => { const event = storyEvent(stage.key); if (event) void inspectEvent(event); }}>
+            disabled={!storyEventById(stage.eventId)}
+            onClick={() => { const event = storyEventById(stage.eventId); if (event) void inspectEvent(event); }}>
             <strong>{stage.label}</strong><span>{stage.detail}</span>
             <small>{EXPERIMENT_EXPLANATIONS[stage.key] || "查看这一阶段的原始记录。"}</small>
           </button>)}
@@ -3383,8 +3505,100 @@ function App() {
         <div><span>完成范围</span><strong>{completionLabel}</strong></div>
         <div><span>工作区恢复</span><strong>{summary?.restore_protocol_version ? "逐实验校验" : "—"}</strong></div>
       </div>
+      {summary && presentation.showCurrentResult && <div className="result-unified" aria-label="结果总览">
+        {/* U05：一次统计。result-counts 是本页唯一的数量分解；未标注与扣下
+            原因已在结论句展开，不再用第二组数字复述同一事实。 */}
+        <div className="result-counts">{verdictCounts(summary).map(item => {
+          const loadLine = item.key === "load" ? diffLines.find(line => line.label === "承重") : undefined;
+          return <button key={item.key} className={`metric metric-${item.key}`}
+            disabled={!loadLine} onClick={() => loadLine && inspectLine(loadLine)}
+            title={loadLine ? "打开一条承重结论的证据" : item.label}>
+            <span>{item.label}</span><strong>{item.value}</strong>
+          </button>;
+        })}</div>
+        {/* 与本次目标相关的主要缺口：优先给出目标里点名的标识符所在的
+            无据行；说明这是示例，不代表全部（U07 同一纪律）。 */}
+        {(() => {
+          const goalText = String(review?.request?.goal || "");
+          const identifiers = new Set(goalText.match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || []);
+          const gaps = diffLines.filter(line => line.label === "无据");
+          const relevant = identifiers.size
+            ? gaps.filter(line => (line.text.match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || []).some(t => identifiers.has(t)))
+            : [];
+          const chosen = (relevant.length ? relevant : gaps).slice(0, 3);
+          if (!chosen.length) return null;
+          return <div className="goal-gaps" aria-label="与目标相关的主要缺口">
+            <strong>与目标相关的主要缺口（示例，不代表全部）</strong>
+            <ul>{chosen.map(line => <li key={`${line.file}:${line.line}`}>
+              <button type="button" onClick={() => inspectLine(line)}
+                title="查看这一行的证据记录">
+                <code>{line.file}:{line.line}</code>
+                <span>{line.text || "（空行）"}</span>
+              </button>
+            </li>)}</ul>
+            <small>完整逐行清单在第 5 步「查看代码证据」，可按三态、文件、可采性筛选。</small>
+          </div>;
+        })()}
+        {/* 「为什么相信它」三栏：结论 / 实验因果链 / 未回答的问题。因果链
+            四帧由同一张单元证书派生（N01），点击落到对应证据事件。 */}
+        <div className="trust-grid" aria-label="为什么相信它">
+          <div className="trust-col trust-thesis">
+            <h3>结论</h3>
+            <p className="result-thesis">水木验码临时拿掉新增代码，观察哪个具名测试失败，再把代码恢复；结论来自可复验实验，不是模型直接猜测。</p>
+          </div>
+          <div className="trust-col trust-story">
+            <h3>实验因果链</h3>
+            <div className="experiment-story">{experimentStages.map((stage, index) =>
+              <button key={stage.key} type="button" className={`story-stage story-${stage.key} story-${stage.state}`}
+                disabled={!storyEventById(stage.eventId)} onClick={() => {
+                  const event = storyEventById(stage.eventId);
+                  if (event) void inspectEvent(event);
+                }} title={storyEventById(stage.eventId) ? "打开对应证据事件" : "本帧尚无对应事件"}>
+                <span>{String(index + 1).padStart(2, "0")}</span><strong>{stage.label}</strong><small>{stage.detail}</small>
+              </button>)}</div>
+          </div>
+          <div className="trust-col trust-open">
+            <h3>未回答的问题与人工决定</h3>
+            <p className="trust-open-note">实验没有回答下面这些；是否采信结论，由人决定。</p>
+            <ul className="trust-uncovered">{uncovered.map((item, i) => <li key={i}>{item}</li>)}</ul>
+          </div>
+        </div>
+        {minimizationViews(summary && reviewBundle
+          ? (reviewBundle.evidence_bundle as Record<string, unknown> | undefined)?.report as
+            Record<string, unknown> | undefined
+          : null).length > 0 &&
+          <details className="minimization" aria-label="最小回归触发集合">
+            <summary>最小回归触发集合</summary>
+            {minimizationViews(((reviewBundle?.evidence_bundle as Record<string, unknown>)
+              ?.report) as Record<string, unknown>).map(view =>
+              <div key={view.anchorId} className="minimization-row">
+                <strong>{view.anchorId}</strong>
+                {view.incompleteReason
+                  ? <span className="minimization-none">{view.notApplicable
+                      ? `最小化不适用：${view.incompleteReason}（未消耗实验）`
+                      : `已尝试但未取得证书（${view.incompleteReason}）`}</span>
+                  : <>
+                    <span>{view.frozenUnits} 条新增语句 → {view.minimalUnits} 条触发
+                      <code>{view.targetRegression}</code></span>
+                    <small>{view.removalChecks} 次逐一移除检查通过{view.oneMinimal ? "，已签发 1-minimal 证书" : ""}</small>
+                    <small className="scope-note">{view.scopeNote}</small>
+                  </>}
+              </div>)}
+          </details>}
+        {/* U08/U09：本页唯一的动作区与导出入口。护照折叠为导出预览，
+            不再与结论区并排复述同一组数字。 */}
+        <div className="stage-actions" aria-label="下一步">
+          <button type="button" className="primary stage-next"
+            onClick={() => { goToStage(4); setWorkbenchOpen(true); }}>下一步：查看代码证据 →</button>
+          <button type="button" onClick={() => goToStage(5)}>直接处理已定位缺口</button>
+        </div>
+      </div>}
+      <details className="unified-export" aria-label="统一导出">
+        <summary>导出：结果摘要与完整审查证据包</summary>
+        <p className="field-note">结果摘要（护照卡）与完整 ReviewBundle 属于本次审查的同一版本；处置回执在第 6 步按任务单独下载，版本不同。</p>
       <section className="evidence-passport" aria-label="证据护照">
-        {/* 完成标题与证据护照各保留一条横幅，离线回放时两处都醒目。 */}
+        {/* #25 复核：这里的第二块横幅不是冗余。product-mode.spec.ts:58-64 明确
+            要求「完成标题与证据护照各有一条横幅」——离线回放必须两处都醒目。 */}
         {offlineNotice && <div className="offline-banner" role="status">
           <strong>{offlineNotice.label}</strong><span>{offlineNotice.detail}</span>
         </div>}
@@ -3421,299 +3635,16 @@ function App() {
         {summaryFallback && <textarea className="passport-copy-fallback" readOnly rows={8}
           aria-label="证据护照 Markdown（可手动复制）" value={summaryFallback} />}
       </section>
+      </details>
+      {/* U06：受控修改入口在第 6 步；这里只留次级跳转。 */}
       {review?.request?.schema_version === "review-request-v2" && !offlineReplay &&
-        <section className="repair-delivery" aria-label="本地修复交付">
-          <div className="repair-heading">
-            <div><span className="passport-kicker">VERIFIED REPAIR DELIVERY</span>
-              <h4>本地修复交付</h4>
-              <p>交付记录只读；补丁必须在隔离 worktree 通过声明测试后才会创建本地分支。</p></div>
-            <strong className={`repair-stamp repair-${repairView.tone}`}>{repairView.label}</strong>
-          </div>
-          <p className="repair-detail">{repairView.detail}</p>
-          {review.repair?.status === "DELIVERED" ? <>
-            <dl className="repair-record">
-              <div><dt>修复分支</dt><dd><code>{String(review.repair.delivery_record?.branch || "—")}</code></dd></div>
-              <div><dt>提交 ID</dt><dd><code>{String(review.repair.delivery_record?.commit || "—")}</code></dd></div>
-              <div><dt>EvidenceManifest</dt><dd>{(() => {
-                const digest = shortHash(review.repair.evidence_manifest_sha256
-                  || review.repair.delivery_record?.evidence_manifest_sha256 || "—");
-                return <code title={digest.full}>{digest.short}{digest.truncated ? "…" : ""}</code>;
-              })()}</dd></div>
-              <div><dt>源提交</dt><dd><code>{String(review.repair.evidence_manifest?.source_commit || "—")}</code></dd></div>
-            </dl>
-            <div className="repair-actions">
-              <button className="download" onClick={downloadRepairEvidence}>下载交付证据</button>
-              <button className="download" onClick={() => void refreshRepairStatus()}>重新读取状态</button>
-            </div>
-          </> : review.repair?.status === "INCOMPLETE" ? <div className="repair-warning">
-            交付工件缺失或不一致。请先清理隔离残留，再重新发起一次完整审查；系统不会覆盖已有分支。
-          </div> : !repairAuthorized ? <div className="repair-warning">
-            本次冻结计划没有授权创建修复分支。若需要交付，请返回配置并明确勾选「验证通过后允许创建本地修复分支」。
-          </div> : <>
-            <label htmlFor="repair-patch">粘贴已审阅的封闭补丁（unified diff）</label>
-            <textarea id="repair-patch" rows={7} value={repairPatch} disabled={repairBusy}
-              placeholder="仅接受 1–5 个文本文件的 unified diff；不会执行补丁中的命令。"
-              onChange={e => setRepairPatch(e.target.value)} />
-            <label htmlFor="repair-session">绑定编辑会话（可选）</label>
-            <select id="repair-session" value={repairSessionId} disabled={repairBusy}
-              onChange={e => setRepairSessionId(e.target.value)}>
-              <option value="">不绑定会话，直接交付</option>
-              {activeSessions.map(session => <option key={session.session_id || ""}
-                value={session.session_id || ""}>
-                {session.session_id}（{editSessionStateView(session.status).label}）
-              </option>)}
-            </select>
-            <small className="repair-note">绑定后，交付前会重新比对会话开启时冻结的源快照；源码变过就拒绝交付，不会把旧补丁盖到新树上。</small>
-            <div className="repair-actions">
-              <button className="primary" disabled={repairBusy || !repairPatch.trim()}
-                onClick={() => void deliverRepair()}>验证补丁并创建本地分支</button>
-              <button className="download" disabled={repairBusy} onClick={() => void refreshRepairStatus()}>重新读取状态</button>
-            </div>
-            <small className="repair-note">系统会再次运行本次声明测试，并在提交前后确认源工作区指纹未改变；不会 push、merge 或切换你的当前 checkout。</small>
-          </>}
-        </section>}
-      {review?.request?.schema_version === "review-request-v2" && !offlineReplay &&
-        <section className="repair-delivery edit-sessions" aria-label="编辑会话与交付记录">
-          <div className="repair-heading">
-            <div><span className="passport-kicker">EDIT SESSIONS LEDGER</span>
-              <h4>编辑会话与交付记录</h4>
-              <p>会话与候选补丁在这里入账：可以开启会话、生成候选补丁、放弃不再需要的会话。</p>
-              <p>已交付的会话在下方交付记录里批准五指纹比对基线——批准只冻结基线，不应用任何改动。</p></div>
-            <button className="download" onClick={() => void refreshEditSessions()}>重新读取</button>
-          </div>
-          {editSessionsNotice
-            && <div className="repair-warning" role="alert">暂时读不到编辑会话与交付记录：{editSessionsNotice}。可以点「重新读取」再试；拿到记录之前，这里不会假装没有这回事。</div>}
-          {sweptSessions.length > 0 && <div className="repair-warning" role="alert">
-            后台检查发现 {sweptSessions.length} 条编辑会话已经收尾，不会再被使用，里面的补丁也不会自动交付：
-            <ul className="es-swept">
-              {sweptSessions.map((session, index) => <li key={session.session_id || `swept-${index}`} >
-                <code>{session.session_id}</code>{session.status === "stale"
-                  ? "已失效：会话锁定的源代码在开启后又发生了变化，冻结补丁已拒绝交付。"
-                  : "已作废：开启会话的进程中断，系统收回该会话。"}
-              </li>)}
-            </ul>
-          </div>}
-          <form className="es-approval" onSubmit={event => {
-            event.preventDefault();
-            void openEditSession();
-          }}>
-            <label htmlFor="edit-session-intent">开启编辑会话：写明这次修改的目的（可选，最多 2000 字）</label>
-            <textarea id="edit-session-intent" rows={2} maxLength={2000}
-              value={sessionIntent} disabled={sessionBusy}
-              placeholder="例如：给 tests/test_calc.py 补上缺失的边界断言"
-              onChange={e => setSessionIntent(e.target.value)} />
-            <div className="repair-actions">
-              <button className="primary" type="submit" disabled={sessionBusy}>开启编辑会话</button>
-            </div>
-            {sessionNotice
-              && <div className="repair-warning" role="alert">会话操作没有完成：{sessionNotice}。台账没有变化，这里不会假装操作已经生效。</div>}
-            <small className="repair-note">开启时会冻结当前源码快照作为比对锚；之后源码再变化，这个会话自动失效，旧补丁不会盖到新树上。</small>
-          </form>
-          {sessionLedger.length === 0
-            ? <p className="empty">还没有编辑会话记录。要走受控修改流程，先用上方表单开启一个会话。</p>
-            : sessionLedger.map((session, index) => {
-              const stateView = editSessionStateView(session.status);
-              const candidates = session.candidates || [];
-              const transitions = session.transitions || [];
-              return <article className="es-card" key={session.session_id || `es-${index}`} >
-                <header>
-                  <code>{session.session_id}</code>
-                  <strong className={`repair-stamp repair-${stateView.tone}`}>{stateView.label}</strong>
-                  {(session.status === "open" || session.status === "patch_candidate") && session.session_id
-                    && <button className="download" type="button" disabled={Boolean(abandonBusyId)}
-                        onClick={() => void abandonEditSession(String(session.session_id))}>
-                        {abandonBusyId === session.session_id ? "正在放弃…" : "放弃这个会话"}
-                      </button>}
-                </header>
-                <dl className="repair-record">
-                  <div><dt>这次修改的目的</dt><dd>{session.intent || "—"}</dd></div>
-                  <div><dt>锁定的源快照指纹</dt><dd>{(() => {
-                    const digest = shortHash(session.snapshot_sha256 || "—");
-                    return <code title={digest.full}>{digest.short}{digest.truncated ? "…" : ""}</code>;
-                  })()}</dd></div>
-                </dl>
-                {candidates.length > 0 ? candidates.map((candidate, itemIndex) => {
-                  const verdictText = String(candidate.verdict || "");
-                  const rejectionText = verdictText.startsWith("rejected")
-                    ? deliveryRejectionText(verdictText.slice(verdictText.indexOf(":") + 1)) : "";
-                  return <div className="es-candidate" key={candidate.patch_sha256 || itemIndex}>
-                    <b>候选补丁 {itemIndex + 1}</b>
-                    <span>补丁指纹 <code title={candidate.patch_sha256}>{(candidate.patch_sha256 || "—").slice(0, 12)}{(candidate.patch_sha256 || "").length > 12 ? "…" : ""}</code></span>
-                    <span>判定 {candidateVerdictView(candidate.verdict)}{rejectionText ? `（${rejectionText}）` : ""}</span>
-                    <span>测试结果 {candidateTestResultView(candidate.test_result)}</span>
-                  </div>;
-                }) : <p className="empty">这个会话还没有候选补丁入账。</p>}
-                {transitions.length > 0 && <p className="es-transitions">状态流转：{transitions.map((transition, transitionIndex) => {
-                  const reason = editSessionExitReasonText(transition.reason);
-                  return <span key={transitionIndex}>{transitionIndex > 0 ? "；" : ""}{editSessionTransitionText(transition.from, transition.to)}{reason ? `（${reason}）` : ""}</span>;
-                })}</p>}
-              </article>;
-            })}
-          {repairAuthorized
-            ? <form className="es-approval" onSubmit={event => {
-                event.preventDefault();
-                void generateRepairCandidate();
-              }}>
-              <h5>生成候选补丁</h5>
-              <p className="repair-detail">把发现编号和选中的代码片段交给模型，得到的是一份候选记录；生成与应用是两件事，候选不会自动变成交付。</p>
-              <label htmlFor="candidate-finding-ids">发现编号（每行一个，或用逗号分隔）</label>
-              <textarea id="candidate-finding-ids" rows={2} value={candidateFindingIds}
-                disabled={candidateBusy} placeholder="例如：claim-1"
-                onChange={e => setCandidateFindingIds(e.target.value)} />
-              <label>代码片段（路径必须在本机审查范围内）</label>
-              {snippetDrafts.map((draft, index) => <div className="es-snippet" key={index}>
-                <input value={draft.path} disabled={candidateBusy} placeholder="pkg/core.py"
-                  aria-label={`片段 ${index + 1} 的文件路径`}
-                  onChange={e => setSnippetDrafts(list => list.map((item, itemIndex) =>
-                    itemIndex === index ? {...item, path: e.target.value} : item))} />
-                <input value={draft.start} disabled={candidateBusy} inputMode="numeric"
-                  aria-label={`片段 ${index + 1} 的起始行`} placeholder="起始行"
-                  onChange={e => setSnippetDrafts(list => list.map((item, itemIndex) =>
-                    itemIndex === index ? {...item, start: e.target.value} : item))} />
-                <textarea rows={3} value={draft.text} disabled={candidateBusy}
-                  aria-label={`片段 ${index + 1} 的内容`} placeholder="选中要交给模型的代码"
-                  onChange={e => setSnippetDrafts(list => list.map((item, itemIndex) =>
-                    itemIndex === index ? {...item, text: e.target.value} : item))} />
-                {snippetDrafts.length > 1 && <button type="button" className="download"
-                    onClick={() => setSnippetDrafts(list =>
-                      list.filter((_, itemIndex) => itemIndex !== index))}>移除这段</button>}
-              </div>)}
-              <div className="repair-actions">
-                <button type="button" className="download" disabled={candidateBusy}
-                  onClick={() => setSnippetDrafts(list => [...list, {path: "", start: "", text: ""}])}>再添一段</button>
-                <button className="primary" type="submit"
-                  disabled={candidateBusy || candidateSnippetBytes > 12 * 1024}>生成候选补丁</button>
-              </div>
-              <small className="repair-note">片段内容合计 {candidateSnippetBytes} / 12288 字节；超过 12 KiB 会被服务端整包拒绝。</small>
-              {candidateNotice
-                && <div className="repair-warning" role="alert">候选没有生成：{candidateNotice}。没有新的入账，这里不会假装生成过。</div>}
-            </form>
-            : <div className="repair-warning">本次冻结计划没有授权创建修复分支，不能在这里生成候选补丁；需要授权时请回到审查配置勾选后重新发起。</div>}
-          {repairCandidate && <div className="es-delivery">
-            <h5>最新候选补丁记录</h5>
-            <dl className="repair-record">
-              <div><dt>候选摘要</dt><dd>{repairCandidate.summary || "—"}</dd></div>
-              <div><dt>补丁指纹</dt><dd>{(() => {
-                const digest = shortHash(repairCandidate.patch_sha256 || "—");
-                return <code title={digest.full}>{digest.short}{digest.truncated ? "…" : ""}</code>;
-              })()}</dd></div>
-              <div><dt>补丁字节数</dt><dd>{repairCandidate.patch_bytes ?? "—"}</dd></div>
-              <div><dt>保留时限</dt><dd>{repairCandidate.retention_days != null ? `${repairCandidate.retention_days} 天` : "—"}</dd></div>
-              <div><dt>候选状态</dt><dd>{repairCandidate.status || "—"}</dd></div>
-            </dl>
-            <p className="repair-note">补丁正文保存在服务端 repair/candidate.patch，界面不直接展示。核对后把你认可的补丁粘贴到上方「本地修复交付」的输入框，人工点击交付才会创建本地分支。</p>
-          </div>}
-          {deliveryRecords.length > 0 ? deliveryRecords.map(session => {
-            const approval = session.delivery_approval || null;
-            const fingerprints = (approval?.fingerprints || {}) as Record<string, string>;
-            return <div className="es-delivery" key={`${session.session_id || "session"}-delivery`}>
-              <h5>交付记录（{session.session_id}）</h5>
-              {!approval
-                ? <form className="es-approval" onSubmit={event => {
-                    event.preventDefault();
-                    void approveDelivery(String(session.session_id || ""));
-                  }}>
-                  <p className="repair-detail">这次交付还没有批准记录。点击下方按钮会把当前五份指纹冻结成比对基线：只记下基线，不应用改动。</p>
-                  <p className="repair-detail">之后导出时会全部重算，任何一份对不上都会拒绝交付。</p>
-                  <label htmlFor="delivery-approval-note">批准备注（可选，最多 200 字）</label>
-                  <textarea id="delivery-approval-note" rows={3} maxLength={200}
-                    value={approvalNote} disabled={approvalBusy}
-                    placeholder="例如：已逐份核对五指纹与交付分支（可选）"
-                    onChange={e => setApprovalNote(e.target.value)} />
-                  <div className="repair-actions">
-                    <button className="primary" type="submit" disabled={approvalBusy}>批准五指纹比对基线</button>
-                  </div>
-                  {approvalNotice
-                    && <div className="repair-warning" role="alert">批准没有完成：{approvalNotice}。五指纹没有被冻结，这里不会假装批准过。</div>}
-                </form>
-                : null}
-              {approval && <>
-                <dl className="repair-record">
-                  <div><dt>批准时间</dt><dd>{approval.at || "—"}</dd></div>
-                  <div><dt>交付分支</dt><dd><code>{approval.branch || "—"}</code></dd></div>
-                  <div><dt>交付提交</dt><dd><code>{approval.commit || "—"}</code></dd></div>
-                </dl>
-                <dl className="es-fingerprints">
-                  {DELIVERY_FINGERPRINT_VIEWS.map(field => {
-                    const digest = shortHash(fingerprints[field.key] || "—");
-                    return <div key={field.key}><dt>{field.label}</dt>
-                      <dd><code title={digest.full}>{digest.short}{digest.truncated ? "…" : ""}</code></dd></div>;
-                  })}
-                </dl>
-                <p className="repair-note">以上是批准时记下的五份指纹；真正交付时会全部重新计算并逐一比对，任何一份对不上都会拒绝。</p>
-                {!session.delivery_export
-                  && <form className="es-approval" onSubmit={event => {
-                    event.preventDefault();
-                    void exportDelivery(String(session.session_id || ""));
-                  }}>
-                    <p className="repair-detail">点击导出前，服务端会重新计算五份指纹，并与上面的批准基线逐一比对；全部一致才生成内容哈希清单。</p>
-                    <div className="repair-actions">
-                      <button className="primary" type="submit"
-                        disabled={exportBusyId !== ""}>
-                        {exportBusyId === String(session.session_id || "")
-                          ? "正在导出…" : "导出交付清单"}
-                      </button>
-                    </div>
-                    {exportNotice
-                      && <div className="repair-warning" role="alert">导出没有完成：{exportNotice}。清单没有生成，这里不会假装导出过。</div>}
-                  </form>}
-              </>}
-              <p className="repair-note">{session.delivery_export
-                ? <>已导出交付清单（清单指纹 <code>{(session.delivery_export.manifest_sha256 || "—").slice(0, 12)}…</code>）。导出物是{DELIVERY_DISCLAIMER}。</>
-                : <>交付物是{DELIVERY_DISCLAIMER}；清单尚未导出。</>}</p>
-            </div>;
-          })
-            : <p className="empty">尚无交付记录。只有你在完整流程里明确批准、且五份指纹全部比对一致后，这里才会出现交付入账。</p>}
-          <details className="es-codes">
-            <summary>交付被拒时的拒绝码对照</summary>
-            <ul>
-              {DELIVERY_REJECTION_CODES.map(code => <li key={code}>
-                <code>{code}</code>：{deliveryRejectionText(code) || "（该码暂无中文对照）"}
-              </li>)}
-            </ul>
-          </details>
-        </section>}
-      {review?.request?.schema_version === "review-request-v2" && !offlineReplay &&
-        <section className="visa-delivery" aria-label="补测签证">
-          <div className="repair-heading">
-            <div><span className="passport-kicker">EFFECTIVE TEST VISA</span>
-              <h4>补测签证</h4>
-              <p>跑绿只是第一道闸：模型提议的测试还必须在冻结的保留集干预上复现断言级失败（k=2 一致）才算有效补测。</p>
-              <p>生成与修订请求永远看不到保留集。</p></div>
-            <strong className={`repair-stamp visa-${proposalView.tone}`}>{proposalView.label}</strong>
-          </div>
-          <p className="repair-detail">{proposalView.detail}</p>
-          {proposalRecord ? <>
-            <dl className="repair-record">
-              <div><dt>候选文件</dt><dd><code>{String(proposalRecord.path || "—")}</code></dd></div>
-              <div><dt>执行轮次</dt><dd>{String((proposalRecord.attempts || []).length)} 轮（含修订 {String(proposalRecord.revisions || 0)} 次）</dd></div>
-              {proposalVisa && <div><dt>保留集复现</dt><dd>{
-                String((proposalVisa.holdout_stage as Record<string, unknown> | undefined)?.signed ?? "—")
-                + " / " + String((proposalVisa.holdout_stage as Record<string, unknown> | undefined)?.denominator ?? "—")
-                + " 条干预签 A"}</dd></div>}
-              <div><dt>有效补测</dt><dd>{proposalRecord.effective === true ? "是 · 已判定有效"
-                : proposalRecord.effective === false ? "否" : "未判定"}</dd></div>
-            </dl>
-            {proposalRecord.question && <div className="repair-warning">{proposalRecord.question}</div>}
-            <div className="visa-attempts">
-              {(proposalRecord.attempts || []).map(attempt => <div key={attempt.round}
-                className={`visa-attempt tone-${attempt.visa_status ? visaStatusView(attempt.visa_status).tone : "idle"}`}>
-                <b>第 {attempt.round} 轮</b>
-                <code>{attempt.path}</code>
-                <span>{attempt.returncode === 0 ? "隔离执行跑绿"
-                  : `隔离执行未跑绿（退出码 ${String(attempt.returncode ?? "?")}）`}</span>
-                <em>{attempt.visa_status ? visaStatusView(attempt.visa_status).label : "未进入签证"}</em>
-              </div>)}
-            </div>
-          </> : <p className="empty">这次审查还没有测试提议记录。{proposalEligible
-            ? "在下方逐行证据视图点开「无据」行即可发起。"
-            : "本次运行未调用模型，不能发起测试提议。"}</p>}
-          <div className="repair-actions">
-            <button className="download" disabled={proposalBusy} onClick={() => void refreshTestProposal()}>重新读取状态</button>
-          </div>
-          <small className="repair-note">候选代码只存在于一次性隔离工作树，Git 永不为其建 commit。</small>
-          <small className="repair-note">未通过补测签证的候选如实标「无效」，不会改写成通过。</small>
-        </section>}
+        <div className="controlled-change-entry" role="note">
+          <span>需要处理缺口？补测候选、受控修改与交付记录都在第 6 步「处置与复验」。</span>
+          <button type="button" onClick={() => goToStage(5)}>进入受控修改</button>
+        </div>}
+      {/* N08：模型参与与透明记录是技术资料，默认折叠，保留入口。 */}
+      <details className="tech-drawer" aria-label="技术与评测：模型参与记录">
+        <summary>技术与评测：模型参与记录</summary>
       {resultRanAsAgent && <div className={`model-participation ${participation.live ? "is-live" : "is-deterministic"}`} aria-label="模型参与记录">
         <h4>模型参与记录</h4>
         {participation.live ? <dl>
@@ -3787,6 +3718,7 @@ function App() {
             ? "确定性运行不生成模型建议。" : "现有证据不足以支撑行动建议，未生成建议。"}</div>}
       </div>}
       </section>}
+      </details>
       <div className="completion-boundary"><h4>结论边界</h4><ul>{uncovered.map((item, i) => <li key={i}>{item}</li>)}</ul></div>
       <div className="completion-actions">
         <label className="replay">打开离线 ReviewBundle<input type="file" accept="application/json"
@@ -3796,51 +3728,37 @@ function App() {
 
     {activeStage === 4 && <section className="diff-panel">
       <div className="panel-title"><span>05</span><h3>查看代码证据</h3><small>{diffLines.length} 行新增代码</small></div>
-      {featuredLine && <section className="evidence-spotlight" aria-label="第一条可追溯结论">
-        <div className="spotlight-code">
-          <div><span>第一条可追溯结论</span><code>{featuredLine.file}:{featuredLine.line}</code></div>
-          <pre><b>{String(featuredLine.line).padStart(3, " ")}</b>
-            <span>{(featuredLine.text?.trim() ? featuredLine.text : featuredSourceLine)
-              || (offlineReplay
-                ? "离线摘要未包含源码文本；如需查看该行，请载入本次审查的源码快照。"
-                : featuredSourceLine === null
-                  ? "正在读取本次审查的只读源码快照…"
-                  : "源码快照未返回这一行；请进入只读工作台核对。")}</span></pre>
-        </div>
-        <div className="spotlight-explanation">
-          <span className={`spotlight-verdict ${linePresentation(featuredLine).className}`}>
-            {linePresentation(featuredLine).badge}</span>
-          <h4>结论是什么</h4>
-          <p>{featuredLine.label === "承重"
-            ? "这行新增代码拥有可复验的测试承重证据。"
-            : `这行当前被判为“${linePresentation(featuredLine).badge}”。`}</p>
-          <h4>为什么</h4><p>{focusExplanation(featuredLine)}</p>
-          <dl>
-            <div><dt>具名测试</dt><dd>{featuredTests[0] || "当前证据没有签发具名测试"}</dd></div>
-            <div><dt>证据等级</dt><dd className="spotlight-grade">
-              <strong>{featuredGrade
-                ? `${featuredGrade.grade}（${featuredGrade.label.replace(/^. 级 · /, "")}）`
-                : "未定级"}</strong>
-              {featuredGrade && <small>{featuredGrade.detail}</small>}
-            </dd></div>
-          </dl>
-          {review && <button type="button" className="workbench-open spotlight-open"
-            onClick={() => {
-              setWorkbenchFocus(current => ({path: featuredLine.file, line: featuredLine.line,
-                nonce: (current?.nonce ?? 0) + 1}));
-              setWorkbenchOpen(true);
-            }}>进入全屏工作台核验</button>}
-        </div>
-      </section>}
+      {/* U07：不再突出“第一条可追溯结论”——它优先挑承重，偏离本次目标。
+          第 5 步直接进入完整证据视图；顶部按本次目标定位相关缺口。 */}
+      {(() => {
+        const goalText = String(review?.request?.goal || "");
+        const identifiers = new Set(goalText.match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || []);
+        const gaps = visibleLines.length ? visibleLines : diffLines;
+        const unevidenced = gaps.filter(line => line.label === "无据");
+        const relevant = identifiers.size
+          ? unevidenced.filter(line => (line.text.match(/[A-Za-z_][A-Za-z0-9_]{2,}/g) || []).some(t => identifiers.has(t)))
+          : [];
+        const chosen = (relevant.length ? relevant : unevidenced).slice(0, 5);
+        if (!chosen.length) return null;
+        return <div className="goal-gaps stage5" aria-label="按目标定位相关缺口">
+          <strong>本次目标相关的证据缺口（{chosen.length} 条，不代表全部；完整清单在下方筛选）</strong>
+          <ul>{chosen.map(line => <li key={`${line.file}:${line.line}`}>
+            <button type="button" onClick={() => inspectLine(line)}
+              title="查看这一行的证据记录">
+              <code>{line.file}:{line.line}</code><span>{line.text || "（空行）"}</span>
+            </button>
+          </li>)}</ul>
+        </div>;
+      })()}
       <section className="review-next" aria-label="核验证据之后">
         <div>
           <strong>核验证据之后</strong>
           <p>有疑问，可在全屏工作台逐行质疑；需要处置，可进入第 6 步选择补测、受控修复或接受风险。采用精确变更需要你明确确认，随后生成新版本复验记录。</p>
         </div>
-        <div className="review-next-actions">
-          {review && reviewBundle && <button type="button" onClick={downloadBundle}>下载完整证据包</button>}
-          <button type="button" className="primary" onClick={() => goToStage(5)}>进入处置与复验</button>
-          <button type="button" onClick={() => goToStage(3)}>查看结论与交付</button>
+        <div className="review-next-actions stage-actions">
+          <button type="button" className="primary stage-next" onClick={() => goToStage(5)}>下一步：处置与复验 →</button>
+          <button type="button" onClick={() => goToStage(3)}>查看结论与导出</button>
+          <span className="field-note">完整证据包已在第 4 步「导出」统一提供，此处不再重复下载。</span>
         </div>
       </section>
       <details className="diff-secondary" open>
@@ -3967,16 +3885,318 @@ function App() {
         </Suspense>
       </div>)}
 
+    {/* U06：受控修改集中在第 6 步。修改目的→候选→验证→是否采用同一屏可见；
+        第 4 步只保留次级入口。 */}
+    {activeStage === 5 && <section className="controlled-change" aria-label="受控修改">
+      <div className="panel-title"><span>06</span><h3>受控修改</h3></div>
+      <p className="field-note controlled-change-intro">写下这次要修改什么。系统会记录当前代码版本，生成候选改动，并先在隔离副本中验证。你可以查看差异后再决定是否采用；验证失败的候选不会自动写入当前代码。</p>
+            {review?.request?.schema_version === "review-request-v2" && !offlineReplay &&
+              <section className="repair-delivery" aria-label="本地修复交付">
+                <div className="repair-heading">
+                  <div><span className="passport-kicker">VERIFIED REPAIR DELIVERY</span>
+                    <h4>本地修复交付</h4>
+                    <p>交付记录只读；补丁必须在隔离 worktree 通过声明测试后才会创建本地分支。</p></div>
+                  <strong className={`repair-stamp repair-${repairView.tone}`}>{repairView.label}</strong>
+                </div>
+                <p className="repair-detail">{repairView.detail}</p>
+                {review.repair?.status === "DELIVERED" ? <>
+                  <dl className="repair-record">
+                    <div><dt>修复分支</dt><dd><code>{String(review.repair.delivery_record?.branch || "—")}</code></dd></div>
+                    <div><dt>提交 ID</dt><dd><code>{String(review.repair.delivery_record?.commit || "—")}</code></dd></div>
+                    <div><dt>EvidenceManifest</dt><dd>{(() => {
+                      const digest = shortHash(review.repair.evidence_manifest_sha256
+                        || review.repair.delivery_record?.evidence_manifest_sha256 || "—");
+                      return <code title={digest.full}>{digest.short}{digest.truncated ? "…" : ""}</code>;
+                    })()}</dd></div>
+                    <div><dt>源提交</dt><dd><code>{String(review.repair.evidence_manifest?.source_commit || "—")}</code></dd></div>
+                  </dl>
+                  <div className="repair-actions">
+                    <button className="download" onClick={downloadRepairEvidence}>下载交付证据</button>
+                    <button className="download" onClick={() => void refreshRepairStatus()}>重新读取状态</button>
+                  </div>
+                </> : review.repair?.status === "INCOMPLETE" ? <div className="repair-warning">
+                  交付工件缺失或不一致。请先清理隔离残留，再重新发起一次完整审查；系统不会覆盖已有分支。
+                </div> : !repairAuthorized ? <div className="repair-warning">
+                  本次冻结计划没有授权创建修复分支。若需要交付，请返回配置并明确勾选「验证通过后允许创建本地修复分支」。
+                </div> : <>
+                  <label htmlFor="repair-patch">粘贴已审阅的封闭补丁（unified diff）</label>
+                  <textarea id="repair-patch" rows={7} value={repairPatch} disabled={repairBusy}
+                    placeholder="仅接受 1–5 个文本文件的 unified diff；不会执行补丁中的命令。"
+                    onChange={e => setRepairPatch(e.target.value)} />
+                  <label htmlFor="repair-session">绑定编辑会话（可选）</label>
+                  <select id="repair-session" value={repairSessionId} disabled={repairBusy}
+                    onChange={e => setRepairSessionId(e.target.value)}>
+                    <option value="">不绑定会话，直接交付</option>
+                    {activeSessions.map(session => <option key={session.session_id || ""}
+                      value={session.session_id || ""}>
+                      {session.session_id}（{editSessionStateView(session.status).label}）
+                    </option>)}
+                  </select>
+                  <small className="repair-note">绑定后，交付前会重新比对会话开启时冻结的源快照；源码变过就拒绝交付，不会把旧补丁盖到新树上。</small>
+                  <div className="repair-actions">
+                    <button className="primary" disabled={repairBusy || !repairPatch.trim()}
+                      onClick={() => void deliverRepair()}>验证补丁并创建本地分支</button>
+                    <button className="download" disabled={repairBusy} onClick={() => void refreshRepairStatus()}>重新读取状态</button>
+                  </div>
+                  <small className="repair-note">系统会再次运行本次声明测试，并在提交前后确认源工作区指纹未改变；不会 push、merge 或切换你的当前 checkout。</small>
+                </>}
+              </section>}
+            {review?.request?.schema_version === "review-request-v2" && !offlineReplay &&
+              <section className="repair-delivery edit-sessions" aria-label="编辑会话与交付记录">
+                <div className="repair-heading">
+                  <div><span className="passport-kicker">EDIT SESSIONS LEDGER</span>
+                    <h4>编辑会话与交付记录</h4>
+                    <p>会话与候选补丁在这里入账：可以开启会话、生成候选补丁、放弃不再需要的会话。</p>
+                    <p>已交付的会话在下方交付记录里批准五指纹比对基线——批准只冻结基线，不应用任何改动。</p></div>
+                  <button className="download" onClick={() => void refreshEditSessions()}>重新读取</button>
+                </div>
+                {editSessionsNotice
+                  && <div className="repair-warning" role="alert">暂时读不到编辑会话与交付记录：{editSessionsNotice}。可以点「重新读取」再试；拿到记录之前，这里不会假装没有这回事。</div>}
+                {sweptSessions.length > 0 && <div className="repair-warning" role="alert">
+                  后台检查发现 {sweptSessions.length} 条编辑会话已经收尾，不会再被使用，里面的补丁也不会自动交付：
+                  <ul className="es-swept">
+                    {sweptSessions.map((session, index) => <li key={session.session_id || `swept-${index}`} >
+                      <code>{session.session_id}</code>{session.status === "stale"
+                        ? "已失效：会话锁定的源代码在开启后又发生了变化，冻结补丁已拒绝交付。"
+                        : "已作废：开启会话的进程中断，系统收回该会话。"}
+                    </li>)}
+                  </ul>
+                </div>}
+                <form className="es-approval es-start" onSubmit={event => {
+                  event.preventDefault();
+                  void openEditSession();
+                }}>
+                  <h4>开始一次修改</h4>
+                  <label htmlFor="edit-session-intent">这次要修改什么？（可选，最多 2000 字）</label>
+                  <textarea id="edit-session-intent" rows={2} maxLength={2000}
+                    value={sessionIntent} disabled={sessionBusy}
+                    placeholder="例如：给 tests/test_calc.py 补上缺失的边界断言"
+                    onChange={e => setSessionIntent(e.target.value)} />
+                  <div className="repair-actions">
+                    <button className="primary" type="submit" disabled={sessionBusy}>开始一次修改</button>
+                  </div>
+                  {sessionNotice
+                    && <div className="repair-warning" role="alert">会话操作没有完成：{sessionNotice}。台账没有变化，这里不会假装操作已经生效。</div>}
+                  <small className="repair-note">开启时会冻结当前源码快照作为比对锚；之后源码再变化，这个会话自动失效，旧补丁不会盖到新树上。</small>
+                </form>
+                {sessionLedger.length === 0
+                  ? <p className="empty">还没有受控修改记录。用上方「开始一次修改」记录修改目的、生成并验证候选。</p>
+                  : sessionLedger.map((session, index) => {
+                    const stateView = editSessionStateView(session.status);
+                    const candidates = session.candidates || [];
+                    const transitions = session.transitions || [];
+                    return <article className="es-card" key={session.session_id || `es-${index}`} >
+                      <header>
+                        <code>{session.session_id}</code>
+                        <strong className={`repair-stamp repair-${stateView.tone}`}>{stateView.label}</strong>
+                        {(session.status === "open" || session.status === "patch_candidate") && session.session_id
+                          && <button className="download" type="button" disabled={Boolean(abandonBusyId)}
+                              onClick={() => void abandonEditSession(String(session.session_id))}>
+                              {abandonBusyId === session.session_id ? "正在放弃…" : "放弃这个会话"}
+                            </button>}
+                      </header>
+                      <dl className="repair-record">
+                        <div><dt>这次修改的目的</dt><dd>{session.intent || "—"}</dd></div>
+                        <div><dt>锁定的源快照指纹</dt><dd>{(() => {
+                          const digest = shortHash(session.snapshot_sha256 || "—");
+                          return <code title={digest.full}>{digest.short}{digest.truncated ? "…" : ""}</code>;
+                        })()}</dd></div>
+                      </dl>
+                      {candidates.length > 0 ? candidates.map((candidate, itemIndex) => {
+                        const verdictText = String(candidate.verdict || "");
+                        const rejectionText = verdictText.startsWith("rejected")
+                          ? deliveryRejectionText(verdictText.slice(verdictText.indexOf(":") + 1)) : "";
+                        return <div className="es-candidate" key={candidate.patch_sha256 || itemIndex}>
+                          <b>候选补丁 {itemIndex + 1}</b>
+                          <span>补丁指纹 <code title={candidate.patch_sha256}>{(candidate.patch_sha256 || "—").slice(0, 12)}{(candidate.patch_sha256 || "").length > 12 ? "…" : ""}</code></span>
+                          <span>判定 {candidateVerdictView(candidate.verdict)}{rejectionText ? `（${rejectionText}）` : ""}</span>
+                          <span>测试结果 {candidateTestResultView(candidate.test_result)}</span>
+                        </div>;
+                      }) : <p className="empty">这个会话还没有候选补丁入账。</p>}
+                      {transitions.length > 0 && <p className="es-transitions">状态流转：{transitions.map((transition, transitionIndex) => {
+                        const reason = editSessionExitReasonText(transition.reason);
+                        return <span key={transitionIndex}>{transitionIndex > 0 ? "；" : ""}{editSessionTransitionText(transition.from, transition.to)}{reason ? `（${reason}）` : ""}</span>;
+                      })}</p>}
+                    </article>;
+                  })}
+                {repairAuthorized
+                  ? <form className="es-approval" onSubmit={event => {
+                      event.preventDefault();
+                      void generateRepairCandidate();
+                    }}>
+                    <h5>生成候选补丁</h5>
+                    <p className="repair-detail">把发现编号和选中的代码片段交给模型，得到的是一份候选记录；生成与应用是两件事，候选不会自动变成交付。</p>
+                    <label htmlFor="candidate-finding-ids">发现编号（每行一个，或用逗号分隔）</label>
+                    <textarea id="candidate-finding-ids" rows={2} value={candidateFindingIds}
+                      disabled={candidateBusy} placeholder="例如：claim-1"
+                      onChange={e => setCandidateFindingIds(e.target.value)} />
+                    <label>代码片段（路径必须在本机审查范围内）</label>
+                    {snippetDrafts.map((draft, index) => <div className="es-snippet" key={index}>
+                      <input value={draft.path} disabled={candidateBusy} placeholder="pkg/core.py"
+                        aria-label={`片段 ${index + 1} 的文件路径`}
+                        onChange={e => setSnippetDrafts(list => list.map((item, itemIndex) =>
+                          itemIndex === index ? {...item, path: e.target.value} : item))} />
+                      <input value={draft.start} disabled={candidateBusy} inputMode="numeric"
+                        aria-label={`片段 ${index + 1} 的起始行`} placeholder="起始行"
+                        onChange={e => setSnippetDrafts(list => list.map((item, itemIndex) =>
+                          itemIndex === index ? {...item, start: e.target.value} : item))} />
+                      <textarea rows={3} value={draft.text} disabled={candidateBusy}
+                        aria-label={`片段 ${index + 1} 的内容`} placeholder="选中要交给模型的代码"
+                        onChange={e => setSnippetDrafts(list => list.map((item, itemIndex) =>
+                          itemIndex === index ? {...item, text: e.target.value} : item))} />
+                      {snippetDrafts.length > 1 && <button type="button" className="download"
+                          onClick={() => setSnippetDrafts(list =>
+                            list.filter((_, itemIndex) => itemIndex !== index))}>移除这段</button>}
+                    </div>)}
+                    <div className="repair-actions">
+                      <button type="button" className="download" disabled={candidateBusy}
+                        onClick={() => setSnippetDrafts(list => [...list, {path: "", start: "", text: ""}])}>再添一段</button>
+                      <button className="primary" type="submit"
+                        disabled={candidateBusy || candidateSnippetBytes > 12 * 1024}>生成候选补丁</button>
+                    </div>
+                    <small className="repair-note">片段内容合计 {candidateSnippetBytes} / 12288 字节；超过 12 KiB 会被服务端整包拒绝。</small>
+                    {candidateNotice
+                      && <div className="repair-warning" role="alert">候选没有生成：{candidateNotice}。没有新的入账，这里不会假装生成过。</div>}
+                  </form>
+                  : <div className="repair-warning">本次冻结计划没有授权创建修复分支，不能在这里生成候选补丁；需要授权时请回到审查配置勾选后重新发起。</div>}
+                {repairCandidate && <div className="es-delivery">
+                  <h5>最新候选补丁记录</h5>
+                  <dl className="repair-record">
+                    <div><dt>候选摘要</dt><dd>{repairCandidate.summary || "—"}</dd></div>
+                    <div><dt>补丁指纹</dt><dd>{(() => {
+                      const digest = shortHash(repairCandidate.patch_sha256 || "—");
+                      return <code title={digest.full}>{digest.short}{digest.truncated ? "…" : ""}</code>;
+                    })()}</dd></div>
+                    <div><dt>补丁字节数</dt><dd>{repairCandidate.patch_bytes ?? "—"}</dd></div>
+                    <div><dt>保留时限</dt><dd>{repairCandidate.retention_days != null ? `${repairCandidate.retention_days} 天` : "—"}</dd></div>
+                    <div><dt>候选状态</dt><dd>{repairCandidate.status || "—"}</dd></div>
+                  </dl>
+                  <p className="repair-note">补丁正文保存在服务端 repair/candidate.patch，界面不直接展示。核对后把你认可的补丁粘贴到上方「本地修复交付」的输入框，人工点击交付才会创建本地分支。</p>
+                </div>}
+                {deliveryRecords.length > 0 ? deliveryRecords.map(session => {
+                  const approval = session.delivery_approval || null;
+                  const fingerprints = (approval?.fingerprints || {}) as Record<string, string>;
+                  return <div className="es-delivery" key={`${session.session_id || "session"}-delivery`}>
+                    <h5>交付记录（{session.session_id}）</h5>
+                    {!approval
+                      ? <form className="es-approval" onSubmit={event => {
+                          event.preventDefault();
+                          void approveDelivery(String(session.session_id || ""));
+                        }}>
+                        <p className="repair-detail">这次交付还没有批准记录。点击下方按钮会把当前五份指纹冻结成比对基线：只记下基线，不应用改动。</p>
+                        <p className="repair-detail">之后导出时会全部重算，任何一份对不上都会拒绝交付。</p>
+                        <label htmlFor="delivery-approval-note">批准备注（可选，最多 200 字）</label>
+                        <textarea id="delivery-approval-note" rows={3} maxLength={200}
+                          value={approvalNote} disabled={approvalBusy}
+                          placeholder="例如：已逐份核对五指纹与交付分支（可选）"
+                          onChange={e => setApprovalNote(e.target.value)} />
+                        <div className="repair-actions">
+                          <button className="primary" type="submit" disabled={approvalBusy}>确认交付版本记录</button>
+                        </div>
+                        {approvalNotice
+                          && <div className="repair-warning" role="alert">批准没有完成：{approvalNotice}。五指纹没有被冻结，这里不会假装批准过。</div>}
+                      </form>
+                      : null}
+                    {approval && <>
+                      <dl className="repair-record">
+                        <div><dt>批准时间</dt><dd>{approval.at || "—"}</dd></div>
+                        <div><dt>交付分支</dt><dd><code>{approval.branch || "—"}</code></dd></div>
+                        <div><dt>交付提交</dt><dd><code>{approval.commit || "—"}</code></dd></div>
+                      </dl>
+                      <dl className="es-fingerprints">
+                        {DELIVERY_FINGERPRINT_VIEWS.map(field => {
+                          const digest = shortHash(fingerprints[field.key] || "—");
+                          return <div key={field.key}><dt>{field.label}</dt>
+                            <dd><code title={digest.full}>{digest.short}{digest.truncated ? "…" : ""}</code></dd></div>;
+                        })}
+                      </dl>
+                      <p className="repair-note">以上是批准时记下的五份指纹；真正交付时会全部重新计算并逐一比对，任何一份对不上都会拒绝。</p>
+                      {!session.delivery_export
+                        && <form className="es-approval" onSubmit={event => {
+                          event.preventDefault();
+                          void exportDelivery(String(session.session_id || ""));
+                        }}>
+                          <p className="repair-detail">点击导出前，服务端会重新计算五份指纹，并与上面的批准基线逐一比对；全部一致才生成内容哈希清单。</p>
+                          <div className="repair-actions">
+                            <button className="primary" type="submit"
+                              disabled={exportBusyId !== ""}>
+                              {exportBusyId === String(session.session_id || "")
+                                ? "正在导出…" : "导出交付清单"}
+                            </button>
+                          </div>
+                          {exportNotice
+                            && <div className="repair-warning" role="alert">导出没有完成：{exportNotice}。清单没有生成，这里不会假装导出过。</div>}
+                        </form>}
+                    </>}
+                    <p className="repair-note">{session.delivery_export
+                      ? <>已导出交付清单（清单指纹 <code>{(session.delivery_export.manifest_sha256 || "—").slice(0, 12)}…</code>）。导出物是{DELIVERY_DISCLAIMER}。</>
+                      : <>交付物是{DELIVERY_DISCLAIMER}；清单尚未导出。</>}</p>
+                  </div>;
+                })
+                  : <p className="empty">尚无交付记录。只有你在完整流程里明确批准、且五份指纹全部比对一致后，这里才会出现交付入账。</p>}
+                <details className="es-codes">
+                  <summary>交付被拒时的拒绝码对照</summary>
+                  <ul>
+                    {DELIVERY_REJECTION_CODES.map(code => <li key={code}>
+                      <code>{code}</code>：{deliveryRejectionText(code) || "（该码暂无中文对照）"}
+                    </li>)}
+                  </ul>
+                </details>
+              </section>}
+            {review?.request?.schema_version === "review-request-v2" && !offlineReplay &&
+              <section className="visa-delivery" aria-label="补测签证">
+                <div className="repair-heading">
+                  <div><span className="passport-kicker">EFFECTIVE TEST VISA</span>
+                    <h4>补测签证</h4>
+                    <p>跑绿只是第一道闸：模型提议的测试还必须在冻结的保留集干预上复现断言级失败（k=2 一致）才算有效补测。</p>
+                    <p>生成与修订请求永远看不到保留集。</p></div>
+                  <strong className={`repair-stamp visa-${proposalView.tone}`}>{proposalView.label}</strong>
+                </div>
+                <p className="repair-detail">{proposalView.detail}</p>
+                {proposalRecord ? <>
+                  <dl className="repair-record">
+                    <div><dt>候选文件</dt><dd><code>{String(proposalRecord.path || "—")}</code></dd></div>
+                    <div><dt>执行轮次</dt><dd>{String((proposalRecord.attempts || []).length)} 轮（含修订 {String(proposalRecord.revisions || 0)} 次）</dd></div>
+                    {proposalVisa && <div><dt>保留集复现</dt><dd>{
+                      String((proposalVisa.holdout_stage as Record<string, unknown> | undefined)?.signed ?? "—")
+                      + " / " + String((proposalVisa.holdout_stage as Record<string, unknown> | undefined)?.denominator ?? "—")
+                      + " 条干预签 A"}</dd></div>}
+                    <div><dt>有效补测</dt><dd>{proposalRecord.effective === true ? "是 · 已判定有效"
+                      : proposalRecord.effective === false ? "否" : "未判定"}</dd></div>
+                  </dl>
+                  {proposalRecord.question && <div className="repair-warning">{proposalRecord.question}</div>}
+                  <div className="visa-attempts">
+                    {(proposalRecord.attempts || []).map(attempt => <div key={attempt.round}
+                      className={`visa-attempt tone-${attempt.visa_status ? visaStatusView(attempt.visa_status).tone : "idle"}`}>
+                      <b>第 {attempt.round} 轮</b>
+                      <code>{attempt.path}</code>
+                      <span>{attempt.returncode === 0 ? "隔离执行跑绿"
+                        : `隔离执行未跑绿（退出码 ${String(attempt.returncode ?? "?")}）`}</span>
+                      <em>{attempt.visa_status ? visaStatusView(attempt.visa_status).label : "未进入签证"}</em>
+                    </div>)}
+                  </div>
+                </> : <p className="empty">这次审查还没有测试提议记录。{proposalEligible
+                  ? "在下方逐行证据视图点开「无据」行即可发起。"
+                  : "本次运行未调用模型，不能发起测试提议。"}</p>}
+                <div className="repair-actions">
+                  <button className="download" disabled={proposalBusy} onClick={() => void refreshTestProposal()}>重新读取状态</button>
+                </div>
+                <small className="repair-note">候选代码只存在于一次性隔离工作树，Git 永不为其建 commit。</small>
+                <small className="repair-note">未通过补测签证的候选如实标「无效」，不会改写成通过。</small>
+              </section>}
+    </section>}
     {activeStage === 5 && <TaskClosure key={review?.review_id || "no-review"}
       reviewId={review?.review_id} reviewComplete={!!review && terminal.has(review.state.status)}
       offline={offlineReplay} ranAsAgent={resultRanAsAgent} findings={diffLines}
       preferredTaskId={preferredTaskId} api={api}
-      onOpenReview={id => void openHistoryReview(id)} onOpenRepair={() => goToStage(3)}
-      onNewAgentReview={() => {changeProductMode("agent"); enterNextRunSetup(); goToStage(0);}} />}
+      onOpenReview={id => void openHistoryReview(id)} onOpenRepair={() => {goToStage(5); setTimeout(() => document.querySelector('section[aria-label="受控修改"]')
+            ?.scrollIntoView({behavior: "smooth", block: "start"}), 60);}}
+      onNewAgentReview={() => {changeProductMode("agent"); enterNextRunSetup(); goToStage(0);}}
+      onClosurePulse={setClosurePulse} />}
 
     {capabilities.length > 0 &&
       <section className="panel capabilities">
-      <details className="panel-fold" open={productMode === "agent"}>
+      <details className="panel-fold">
         <summary className="panel-title"><h3>能力状态</h3>
           <small>门槛先冻结，再测量</small></summary>
       <p className="field-note">状态由预先冻结的门槛判定。没过门槛的能力保留为负结果或关闭，
@@ -4015,7 +4235,7 @@ function App() {
           <span className="pulse-no" aria-hidden="true"><i />{phase.no}</span>
           <div className="pulse-body">
             <strong>{phase.label}
-              <b className="pulse-state">{STAGE_STATE_LABELS[pulseStates[index]]}</b></strong>
+              <b className="pulse-state">{pulseLabels[index]}</b></strong>
             <p><span className="pulse-k">输入</span>{phase.input}</p>
             <p><span className="pulse-k">产出</span>{phase.output}</p>
             <p className={`pulse-gate${phase.gate ? "" : " is-none"}`}>
@@ -4074,7 +4294,6 @@ function App() {
         event={selected}
         recorded={dispositions.filter(row => row.event_id === selected.event_id)}
         answer={dispositionAnswer} onAnswer={setDispositionAnswer}
-        handler={dispositionHandler} onHandler={setDispositionHandler}
         note={dispositionNote} onNote={setDispositionNote}
         busy={dispositionBusy} canSubmit={Boolean(review)}
         onSubmit={() => void recordDisposition(selected)} />
@@ -4083,8 +4302,9 @@ function App() {
     {/* 评测回执 · 只读证据：回执是冻结评测的产物，这里只有索引与明细
         两种读取，没有任何写操作；FAIL 也原样展示，不粉饰。 */}
     <section className="receipt-browser" aria-label="评测回执">
-      <div className="panel-title"><span>证</span><h3>评测回执 · 只读证据</h3>
-        <small>{receiptIndex.length} 份冻结评测回执</small></div>
+      <details className="tech-drawer">
+      <summary className="panel-title"><span>证</span><h3>评测回执 · 只读证据</h3>
+        <small>{receiptIndex.length} 份冻结评测回执</small></summary>
       <div className="receipt-body">
         <div className="receipt-index" role="list">
           {receiptIndex.map(entry => <button key={entry.id} type="button" role="listitem"
@@ -4128,6 +4348,7 @@ function App() {
           ? <div className="receipt-detail empty">正在读取回执明细…</div>
           : <div className="receipt-detail empty">选择左侧一份回执查看明细。</div>}
       </div>
+      </details>
     </section>
     <footer><div className="footer-runtime"><span>运行来源 · {runMode}</span><span>执行模式 · {executionMode}</span>
       <span>调度方式 · {displaySchedulingMode}</span><span>结论边界 · 仅限已声明测试范围，不代表语义等价</span></div>
@@ -4142,4 +4363,4 @@ function App() {
 }
 
 createRoot(document.getElementById("root")!).render(
-  <StrictMode><AppErrorBoundary><App /></AppErrorBoundary></StrictMode>);
+  <StrictMode><AppErrorBoundary><ChatRoute><App /></ChatRoute></AppErrorBoundary></StrictMode>);

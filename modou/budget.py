@@ -32,9 +32,14 @@ class Budget:
     probes_used: int = 0
 
     @classmethod
-    def start(cls, baseline_seconds: float, started: float | None = None) -> "Budget":
+    def start(cls, baseline_seconds: float, started: float | None = None,
+              total: float | None = None) -> "Budget":
+        # total 缺省才落回 TOTAL：调用方（AnalysisSession）必须把用户审批的
+        # budget_seconds 传进来。这里曾经被漏掉——--budget 120 的审查实际
+        # 按 300 秒跑，用户设的预算对探测阶段不起作用。
         return cls(started=started if started is not None else time.time(),
-                   baseline_seconds=baseline_seconds)
+                   baseline_seconds=baseline_seconds,
+                   total=TOTAL if total is None else float(total))
 
     @property
     def elapsed(self) -> float:

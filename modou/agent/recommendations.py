@@ -67,12 +67,16 @@ def _line_ref(path: str, lineno: int) -> str:
 
 
 def build_input(*, goal: str, stop_reason: str, lines: list[dict],
-                evidence_rows: list[dict]) -> dict:
+                evidence_rows: list[dict], include_snippets: bool = True) -> dict:
     """组装受限输入：相关新增行 + 证据编号，全部封顶在 80 行 / 12KB。
 
     `lines` 是 report.render_model.lines 的子集（file/line/text/label/
     evidence_ids）。代码行文本被包进显式的不可信边界，代码注释里的
     提示注入到模型那里只是数据，不是指令。
+
+    N09：行文本属于 selected_snippets 数据类别。include_snippets=False
+    （本次授权未包含该类别）时只发送行号引用与三态标签——引用结构属于
+    已授权的 diff_summary 口径，不携带代码内容。
     """
     relevant = [row for row in lines
                 if isinstance(row, dict) and row.get("file") and row.get("line")]
@@ -88,7 +92,7 @@ def build_input(*, goal: str, stop_reason: str, lines: list[dict],
             break
         rendered = _line_ref(str(row["file"]), int(row["line"]))
         chunk = {"ref": rendered, "label": str(row.get("label") or ""),
-                 "text": str(row.get("text") or "")[:400]}
+                 "text": (str(row.get("text") or "")[:400] if include_snippets else "")}
         size = len(json.dumps(chunk, ensure_ascii=False).encode("utf-8"))
         if total + size > MAX_BYTES:
             break
@@ -125,6 +129,9 @@ def build_input(*, goal: str, stop_reason: str, lines: list[dict],
             "begin": UNTRUSTED_BEGIN,
             "end": UNTRUSTED_END,
             "lines": chosen,
+            **({} if include_snippets else {
+                "snippets_withheld": "本次授权未包含 selected_snippets；"
+                                     "只提供行号引用与三态标签，不提供代码内容。"}),
         },
         "evidence_ids": evidence_ids,
         "constraints": {

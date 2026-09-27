@@ -97,7 +97,7 @@ class LocalClient:
         return self.request("GET", path)
 
     def delegation_check(self, task_id: str, reason: str = "programming_entry") -> dict:
-        """在既有有效授权下触发一次检查。
+        """在既有有效授权下触发一次检查（R3，08430cc 复核修正）。
 
         与创建/续期授权是两件事：这里只能触发已授权范围内的检查与复验，
         服务的状态机决定投递、无变化还是拒绝（过期/停止/要求变化/额度用完
