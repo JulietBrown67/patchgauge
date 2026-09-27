@@ -51,16 +51,25 @@ def notes_path(tag: str) -> Path:
 
 
 def tracked_tree_sha256() -> str:
-    """Hash the public commit's tracked files in stable path order."""
+    """Hash the public commit's tracked files in stable path order.
+
+    The order must be plain string order over POSIX paths — the same order
+    ``build_public_release_tree._tree_digest`` and
+    ``verify_release_evidence.tree_digest`` use. Sorting ``Path`` objects
+    compares part tuples instead, which orders ``master-views.css`` and
+    ``master/...`` differently and silently produces a different digest for
+    trees containing both shapes (first observed at 236 files on
+    v0.2.0-experimental.2; the CI verify step caught it).
+    """
     raw = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, check=True,
                          capture_output=True).stdout
-    paths = [Path(item.decode()) for item in raw.split(b"\0") if item]
+    paths = sorted(item.decode() for item in raw.split(b"\0") if item)
     digest = hashlib.sha256()
-    for relative in sorted(paths):
-        if relative in EXCLUDED_DIGEST_FILES:
+    for relative in paths:
+        if Path(relative) in EXCLUDED_DIGEST_FILES:
             continue
         blob = ROOT / relative
-        digest.update(relative.as_posix().encode())
+        digest.update(relative.encode())
         digest.update(b"\0")
         digest.update(hashlib.sha256(blob.read_bytes()).digest())
     return digest.hexdigest()
