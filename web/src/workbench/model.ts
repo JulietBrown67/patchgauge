@@ -124,7 +124,7 @@ export function verdictForLine(line: EvidenceLine): Verdict {
   return "unlabeled";
 }
 
-/** 未标注原因的唯一权威表：与后端 modou/models.py 的 Unlabeled 枚举一一对应；
+/** 未标注原因的唯一权威表：与后端 patchgauge/models.py 的 Unlabeled 枚举一一对应；
  * 报告按原因单独计数，界面负责把同一原因用人话讲出来。
  * noun 是短名词（徽章、汇总句用），why 是一句话解释（逐行说明用）；
  * 主界面与工作台都从这里取词，不允许再抄第二份。 */

@@ -16,8 +16,8 @@ import {describe, expect, it} from "vitest";
 const HERE = fileURLToPath(new URL("../", import.meta.url));
 const read = (rel: string): string => readFileSync(HERE + rel, "utf-8");
 
-const BACKEND = read("../modou/agent/delivery_ceremony.py");
-const CONTROL = read("../modou/server/control.py");
+const BACKEND = read("../patchgauge/agent/delivery_ceremony.py");
+const CONTROL = read("../patchgauge/server/control.py");
 const PRESENTATION = read("src/presentation.ts");
 
 /** 取某一行声明里、两个界符之间的那段（从 `name` 那一行往后找，避免命中注释）。 */

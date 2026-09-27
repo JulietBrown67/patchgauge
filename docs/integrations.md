@@ -5,7 +5,7 @@
 在已经启动的本地后台上使用包内 Python 解释器运行客户端。连接地址和一次性令牌只从当前会话或本地运行目录读取，不要把令牌写入仓库或提交到日志：
 
 ```bash
-python -m modou.mcp --connect http://127.0.0.1:8765 --token-file ../run/server.token
+python -m patchgauge.mcp --connect http://127.0.0.1:8765 --token-file ../run/server.token
 ```
 
-实际端口以启动器输出为准。使用 VS Code 时设置 `shuimu.projectPath`、`shuimu.pythonPath` 和 `shuimu.server`，首次连接时输入本次服务令牌。扩展只支持受信本地工作区，不发布到扩展市场。
+实际端口以启动器输出为准。使用 VS Code 时设置 `patchgauge.projectPath`、`patchgauge.pythonPath` 和 `patchgauge.server`，首次连接时输入本次服务令牌。扩展只支持受信本地工作区，不发布到扩展市场。

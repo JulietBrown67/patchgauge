@@ -404,7 +404,7 @@ class AppErrorBoundary extends Component<{children: ReactNode}, {error: Error | 
   state: {error: Error | null} = {error: null};
   static getDerivedStateFromError(error: Error) { return {error}; }
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("水木验码界面异常", error, info.componentStack);
+    console.error("PatchGauge界面异常", error, info.componentStack);
   }
   render() {
     if (!this.state.error) return this.props.children;
@@ -487,7 +487,7 @@ function TutorialPage({onBack}: {onBack: () => void}) {
     <div className="tutorial-body">
       <section>
         <h2>这是一个什么工具</h2>
-        <p>水木验码是一个不会自行签字的证据审查智能体。<strong>AI 负责提议，实验负责签字，人负责批准边界。</strong></p>
+        <p>PatchGauge是一个不会自行签字的证据审查智能体。<strong>AI 负责提议，实验负责签字，人负责批准边界。</strong></p>
         <p>承重结论都能回到具名测试、恢复校验与封存证据。</p>
         <div className="experiment-loop" aria-label="可逆实验步骤">
           <span>拿走代码</span><i>→</i><span>测试报警</span><i>→</i><span>恢复代码</span>
@@ -674,7 +674,7 @@ function DecisionGate({event, onDecide, busy}: {
   </section>;
 }
 
-// 记忆规则卡：展示仓库里已确认的记忆规则（.shuimu/review-memory.yaml，
+// 记忆规则卡：展示仓库里已确认的记忆规则（.patchgauge/review-memory.yaml，
 // 服务端 intake 时读出并放进 request.review_memory）。C1 起它不再只读：
 // 「记住这条规则」把人确认过的规则写回仓库，撤销走同一条留痕路径。
 // 两条纪律与处置面板一致：写入必须带处理人（confirmed_by）；离线回放
@@ -779,7 +779,7 @@ function MemoryRulesCard({rules, repoId, writable}: {
         onChange={e => setRule(e.target.value)} />
       <label htmlFor="memory-applies">适用路径（可选，逗号分隔）</label>
       <input id="memory-applies" value={appliesTo} maxLength={400}
-        placeholder="例如：modou/agent, web/src" onChange={e => setAppliesTo(e.target.value)} />
+        placeholder="例如：patchgauge/agent, web/src" onChange={e => setAppliesTo(e.target.value)} />
       <button type="button" className="memory-submit"
         disabled={busy || !rule.trim()}
         onClick={() => void remember()}>{busy ? "保存中…" : "记住这条规则"}</button>
@@ -852,11 +852,11 @@ const AGENT_PULSE = [
   {no: "05", key: "memory", label: "评论与记忆", input: "结论与逐行证据",
     output: "评论、处置记录与仓库审查记忆", gate: "评论与记忆确认"},
 ] as const;
-const SESSION_STAGE_KEY = "modou.session.stage";
+const SESSION_STAGE_KEY = "patchgauge.session.stage";
 // #45 本会话见过的审查 id：页头「审查历史」入口的数据源。后端没有
 // 列出审查的接口，只能客户端记；随标签页结束清空，上限 20 条。
 // 故意不参与清空工作台的清场：清空之后还能回到上一次结果，正是它的职责。
-const REVIEW_HISTORY_KEY = "modou.session.review_history";
+const REVIEW_HISTORY_KEY = "patchgauge.session.review_history";
 const REVIEW_HISTORY_LIMIT = 20;
 const STAGE_STATE_LABELS = {waiting: "等待", active: "进行中", ready: "就绪", done: "已完成", error: "异常"} as const;
 type StageState = keyof typeof STAGE_STATE_LABELS;
@@ -880,7 +880,7 @@ async function fetchTerminalReview(reviewId: string): Promise<Review> {
 }
 
 // 终态 reason → 中文标题：结果页最大的字不允许出现裸英文串。
-// 键与 modou/server/control.py 的 transition reason 一一对应；映射不到
+// 键与 patchgauge/server/control.py 的 transition reason 一一对应；映射不到
 // 的 reason（多为 SessionError 的 "stage:detail" 或异常类名）一律落
 // 「审查未正常完成」，原始串收进技术记录行，不再顶到大标题。
 const TERMINAL_REASON_TITLES: Record<string, string> = {
@@ -1007,7 +1007,7 @@ function App() {
   const [presetId, setPresetId] = useState("");
   const [theme, setTheme] = useState<"dark" | "beige">(() => {
     // 答辩默认使用深色；曾主动选择浅色的用户继续沿用自己的选择。
-    try { return localStorage.getItem("shuimu-theme") === "beige" ? "beige" : "dark"; }
+    try { return localStorage.getItem("patchgauge-theme") === "beige" ? "beige" : "dark"; }
     catch { return "dark"; }
   });
 
@@ -1017,7 +1017,7 @@ function App() {
     else root.removeAttribute("data-theme");
     document.querySelector('meta[name="theme-color"]')
       ?.setAttribute("content", theme === "beige" ? "#f3eee2" : "#0b0714");
-    try { localStorage.setItem("shuimu-theme", theme); } catch { /* 隐私模式下静默降级 */ }
+    try { localStorage.setItem("patchgauge-theme", theme); } catch { /* 隐私模式下静默降级 */ }
   }, [theme]);
   const [repoId, setRepoId] = useState("");
   const [repoPath, setRepoPath] = useState("");
@@ -1506,7 +1506,7 @@ function App() {
   // 不等于核验完成；第 6 步更不会因为被进入而替第 5 步打勾。
   const [visitedStages, setVisitedStages] = useState<number[]>(() => {
     try {
-      const saved = JSON.parse(sessionStorage.getItem("modou.session.visited_stages") || "null") as
+      const saved = JSON.parse(sessionStorage.getItem("patchgauge.session.visited_stages") || "null") as
         {review_id?: unknown; stages?: unknown} | null;
       return Array.isArray(saved?.stages)
         ? (saved.stages as unknown[]).filter((x): x is number => Number.isInteger(x))
@@ -1621,7 +1621,7 @@ function App() {
         sessionStorage.setItem(SESSION_STAGE_KEY, JSON.stringify({
           review_id: review.review_id, stage: next, auto_follow: nextFollow,
         }));
-        sessionStorage.setItem("modou.session.visited_stages", JSON.stringify({
+        sessionStorage.setItem("patchgauge.session.visited_stages", JSON.stringify({
           review_id: review.review_id,
           stages: visitedStages.includes(next) ? visitedStages : [...visitedStages, next],
         }));
@@ -1635,7 +1635,7 @@ function App() {
       const saved = JSON.parse(sessionStorage.getItem(SESSION_STAGE_KEY) || "null") as
         {review_id?: unknown; stage?: unknown; auto_follow?: unknown} | null;
       if (saved?.review_id !== review.review_id) return;
-      const visited = JSON.parse(sessionStorage.getItem("modou.session.visited_stages") || "null") as
+      const visited = JSON.parse(sessionStorage.getItem("patchgauge.session.visited_stages") || "null") as
         {review_id?: unknown; stages?: unknown} | null;
       if (visited?.review_id === review.review_id && Array.isArray(visited.stages)) {
         setVisitedStages((visited.stages as unknown[])
@@ -2550,7 +2550,7 @@ function App() {
     }, null, 2);
     const url = URL.createObjectURL(new Blob([payload], {type: "application/json"}));
     const a = document.createElement("a");
-    a.href = url; a.download = `shuimu-yanma-repair-${review.review_id}.json`; a.click();
+    a.href = url; a.download = `patchgauge-repair-${review.review_id}.json`; a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -2622,7 +2622,7 @@ function App() {
       if (!response.ok) throw new HttpError(response.status, "DOWNLOAD_FAILED", `下载失败：${response.status}`);
       const url = URL.createObjectURL(await response.blob());
       const a = document.createElement("a");
-      a.href = url; a.download = `shuimu-yanma-review-${review.review_id}.json`; a.click();
+      a.href = url; a.download = `patchgauge-review-${review.review_id}.json`; a.click();
       URL.revokeObjectURL(url);
     } catch (e) { setError(noticeFor(e)); }
   }
@@ -2794,7 +2794,7 @@ function App() {
       <div className="hero-copy"><p className="eyebrow">EVIDENCE-GATED REVIEW AGENT</p>
         <h2>{review ? <em>让实验为结论签字。</em>
           : <>让智能体追问每一行，<em>让实验<wbr />为结论签字。</em></>}</h2>
-        <p className="hero-context">水木验码是一个不会自行签字的证据审查智能体：它理解意图、编排候选、提出质疑，但只有可逆实验能确认事实。</p>
+        <p className="hero-context">PatchGauge是一个不会自行签字的证据审查智能体：它理解意图、编排候选、提出质疑，但只有可逆实验能确认事实。</p>
         <p className="hero-description"><strong>AI 负责提议，实验负责签字，人负责批准边界。</strong>承重结论都能回到具名测试、恢复校验与封存证据。</p>
         {boundaryAgent && <div className="agent-role-map" aria-label="审查智能体职责边界">
           <span><b>01</b><strong>智能体</strong><small>理解 · 编排 · 追问</small></span>
@@ -3265,9 +3265,9 @@ function App() {
               <summary>配置模型</summary>
               <p>在启动本地服务前设置模型环境变量（详见 docs/live-model-demo.md）：</p>
               <ul>
-                <li><code>SHUIMU_YANMA_MODEL_BASE_URL</code></li>
-                <li><code>SHUIMU_YANMA_MODEL_API_KEY</code></li>
-                <li><code>SHUIMU_YANMA_MODEL_ID</code></li>
+                <li><code>PATCHGAUGE_MODEL_BASE_URL</code></li>
+                <li><code>PATCHGAUGE_MODEL_API_KEY</code></li>
+                <li><code>PATCHGAUGE_MODEL_ID</code></li>
               </ul>
               <p>重启服务后这里会恢复可创建。</p>
             </details>
@@ -3304,7 +3304,7 @@ function App() {
             busy={reviseBusy} revisable={canRevise}
             onSubmit={() => void submitRevision()} />
           <button className="approve" disabled={busy} onClick={approve}>确认计划并开始审查</button>
-          <small>水木验码不会自动删代码：它临时移除、观察具名测试、随后恢复。未经这一步不会执行任何实验。</small>
+          <small>PatchGauge不会自动删代码：它临时移除、观察具名测试、随后恢复。未经这一步不会执行任何实验。</small>
         </div>}
         {review?.plan ? <>
           <details className="plan-fingerprint"><summary>技术指纹</summary>
@@ -3544,7 +3544,7 @@ function App() {
         <div className="trust-grid" aria-label="为什么相信它">
           <div className="trust-col trust-thesis">
             <h3>结论</h3>
-            <p className="result-thesis">水木验码临时拿掉新增代码，观察哪个具名测试失败，再把代码恢复；结论来自可复验实验，不是模型直接猜测。</p>
+            <p className="result-thesis">PatchGauge临时拿掉新增代码，观察哪个具名测试失败，再把代码恢复；结论来自可复验实验，不是模型直接猜测。</p>
           </div>
           <div className="trust-col trust-story">
             <h3>实验因果链</h3>
@@ -3677,7 +3677,7 @@ function App() {
           <span>{schedulingMode} · 0 次模型调用 · 0 次降级</span>
           {autonomy && <span>自主 {autonomy.autonomous_decisions} 次 · 升级 {autonomy.escalations} 次</span>}
         </div>}
-        <p>模型只调整检查顺序；测试结果、证据结论和恢复校验由水木验码执行。</p>
+        <p>模型只调整检查顺序；测试结果、证据结论和恢复校验由PatchGauge执行。</p>
       </div>}
       {resultRanAsAgent && participation.live && <section className="model-transparency" aria-label="模型透明记录">
         <div className="model-transcript">
@@ -4354,7 +4354,7 @@ function App() {
       <span>调度方式 · {displaySchedulingMode}</span><span>结论边界 · 仅限已声明测试范围，不代表语义等价</span></div>
       <div className="footer-meta">
         <p className="footer-author">作者 杨佩立（清华大学）· © 2026 杨佩立 版权所有</p>
-        <p><strong>水木验码</strong>为学生参赛项目；Modou／水木验码为代码与历史实验沿用的技术标识。<br />
+        <p><strong>PatchGauge</strong>为学生参赛项目；PatchGauge／PatchGauge为代码与历史实验沿用的技术标识。<br />
           本项目不代表清华大学官方产品、授权或合作背书。</p>
       </div></footer>
 

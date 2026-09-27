@@ -11,7 +11,7 @@ import {
 import type { ChatEvent } from "./cards";
 import "./chat.css";
 
-const CHAT_CONV_KEY = "modou.chat.conv";
+const CHAT_CONV_KEY = "patchgauge.chat.conv";
 const CHAT_HASH = "#/chat";
 
 class HttpError extends Error {
@@ -168,7 +168,7 @@ function ChatPage() {
   return (
     <div className="chatp-page">
       <header className="chatp-head">
-        <h1>水木验码 · 对话</h1>
+        <h1>PatchGauge · 对话</h1>
         <span className="chatp-sub">结论来自实验回执，不来自聊天</span>
         <a href="#/">返回主界面</a>
       </header>

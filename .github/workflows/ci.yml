@@ -3,6 +3,7 @@ name: Public CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -24,7 +25,14 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-agent.in
       - run: pip install -r requirements-agent.in
-      - run: python tools/public_release_check.py
+      - name: Install and smoke-test the built distribution
+        run: |
+          python -m pip wheel . --no-deps --wheel-dir /tmp/patchgauge-wheel
+          python -m venv /tmp/patchgauge-installed
+          /tmp/patchgauge-installed/bin/python -m pip install /tmp/patchgauge-wheel/patchgauge-*.whl
+          /tmp/patchgauge-installed/bin/patchgauge --help
+          /tmp/patchgauge-installed/bin/python -c "from patchgauge import capabilities; assert capabilities.load()"
+      - run: python tools/public_release_check.py --root "$GITHUB_WORKSPACE"
       - run: python tests/run.py
       - uses: actions/setup-node@v4
         with:

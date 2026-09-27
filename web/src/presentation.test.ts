@@ -371,10 +371,10 @@ describe("工作台焦点与分权泳道", () => {
     expect(laneOf({kind: "scheduler.next", data: {selection: "model_reprioritized"}}))
       .toBe("模型建议");
     expect(laneOf({kind: "recommendation.generated"})).toBe("模型建议");
-    expect(laneOf({kind: "baseline.completed"})).toBe("水木验码执行");
-    expect(laneOf({kind: "restore.verified"})).toBe("水木验码执行");
+    expect(laneOf({kind: "baseline.completed"})).toBe("PatchGauge执行");
+    expect(laneOf({kind: "restore.verified"})).toBe("PatchGauge执行");
     expect(laneOf({kind: "observation.recorded"})).toBe("测试执行");
-    expect(laneOf({kind: "unknown.future_event"})).toBe("水木验码执行");
+    expect(laneOf({kind: "unknown.future_event"})).toBe("PatchGauge执行");
   });
 
   it("uses three lanes for live and two for deterministic runs", () => {
@@ -383,10 +383,10 @@ describe("工作台焦点与分权泳道", () => {
       {kind: "observation.recorded"},
     ];
     expect(laneEvents(events, true).map(group => [group.lane, group.events.length])).toEqual([
-      ["模型建议", 1], ["水木验码执行", 1], ["测试执行", 1],
+      ["模型建议", 1], ["PatchGauge执行", 1], ["测试执行", 1],
     ]);
     expect(laneEvents(events, false).map(group => group.lane)).toEqual([
-      "水木验码执行", "测试执行",
+      "PatchGauge执行", "测试执行",
     ]);
     expect(laneEvents(events, false)[0].events.map(event => event.kind)).not.toContain(
       "model.request.started");
@@ -438,7 +438,7 @@ describe("证据护照", () => {
   });
 
   it("never stamps an in-progress review state as COMPLETE (full enum guard)", () => {
-    // 全量枚举来自 modou/agent/review.py 的 ReviewStatus（25 态）。
+    // 全量枚举来自 patchgauge/agent/review.py 的 ReviewStatus（25 态）。
     const terminal = ["COMPLETE", "COMPLETED", "PARTIAL", "FAILED", "ABORTED",
       "CANCELLED"] as const;
     const nonTerminal = ["CREATED", "DRAFTING", "INTAKE_VALIDATED",
@@ -812,7 +812,7 @@ describe("能力状态", () => {
       .toBe("文件名包含「calc」");
     expect(locateEvidenceLabel("directory", "directory contains 'pkg'"))
       .toBe("目录名包含「pkg」");
-    // 后端目录命中实际发的是 kind="filename" + directory detail（modou/locate.py）。
+    // 后端目录命中实际发的是 kind="filename" + directory detail（patchgauge/locate.py）。
     expect(locateEvidenceLabel("filename", "directory contains 'pkg'"))
       .toBe("目录名包含「pkg」");
     expect(locateEvidenceLabel("content", "content contains 'scaled' at line 2"))

@@ -1,7 +1,7 @@
 import {UNLABELED_REASONS} from "./workbench/model";
 
-export const SESSION_TOKEN_KEY = "modou.session.token";
-export const SESSION_REVIEW_KEY = "modou.session.review_id";
+export const SESSION_TOKEN_KEY = "patchgauge.session.token";
+export const SESSION_REVIEW_KEY = "patchgauge.session.review_id";
 
 export const COMMON_UNCOVERED = [
   "结论只在已声明的测试范围（FAIL_TO_PASS ∪ PASS_TO_PASS）内成立",
@@ -186,7 +186,7 @@ export function planRevisionViews(raw: unknown, currentId?: string): PlanRevisio
   return views.length > 1 ? views : [];
 }
 
-// 人工处置的答案词表，与后端 modou/server/control.py 的 _DISPOSITION_ANSWERS
+// 人工处置的答案词表，与后端 patchgauge/server/control.py 的 _DISPOSITION_ANSWERS
 // 逐字对齐。**不是自由输入**：答案是封闭词表，界面发明不出后端不认的答案。
 // 两边分叉的话，人在界面上选完会收到一个 DISPOSITION_ANSWER_INVALID，而界面
 // 并不知道自己错在哪——所以这张表有测试钉住。
@@ -305,8 +305,8 @@ export function repairStatusView(status?: string | null): RepairStatusView {
 }
 
 // ---- #9/#10 编辑会话与交付入账（只读展示） ------------------------------
-// M1 七态状态机（modou/server/edit_sessions.py:16-22）与 M2 五指纹交付
-// （modou/agent/delivery_ceremony.py）的展示映射。这里只做标签翻译：
+// M1 七态状态机（patchgauge/server/edit_sessions.py:16-22）与 M2 五指纹交付
+// （patchgauge/agent/delivery_ceremony.py）的展示映射。这里只做标签翻译：
 // 不产生任何批准、贴补丁或下载动作。
 
 export type EditSessionCandidate = {
@@ -425,7 +425,7 @@ export function candidateTestResultView(result?: string | null): string {
   return value;
 }
 
-// 交付重算不一致的拒绝码（modou/agent/delivery_ceremony.py:48-54 的
+// 交付重算不一致的拒绝码（patchgauge/agent/delivery_ceremony.py:48-54 的
 // MISMATCH_CODES，加上交付文档列出的越界码）。中文名只做解释，不替代码值。
 export const DELIVERY_REJECTION_CODES: ReadonlyArray<string> = [
   "DELIVERY_APPROVAL_STALE",
@@ -457,7 +457,7 @@ export const DELIVERY_FINGERPRINT_VIEWS: ReadonlyArray<{key: string; label: stri
   {key: "target_ref", label: "交付分支目标"},
 ];
 
-// 交付物措辞红线（modou/agent/delivery_ceremony.py:40 DISCLAIMER 原句）。
+// 交付物措辞红线（patchgauge/agent/delivery_ceremony.py:40 DISCLAIMER 原句）。
 export const DELIVERY_DISCLAIMER = "内容哈希清单，非安全签署";
 
 export function schedulingDetail(kind: string, data: Record<string, unknown>): string {
@@ -481,7 +481,7 @@ export function schedulingDetail(kind: string, data: Record<string, unknown>): s
 }
 
 // ---- 仓库审查记忆：只读卡的中文呈现 ----------------
-// 规则内容与词表由 modou/agent/memory.py 把守；这里只做展示层翻译。
+// 规则内容与词表由 patchgauge/agent/memory.py 把守；这里只做展示层翻译。
 // 记忆是上下文，不是授权：卡片永远与红线说明同屏，不提供写入路径。
 const MEMORY_KINDS: Record<string, {label: string; hint: string; example: string}> = {
   review_preference: {label: "审查偏好",
@@ -534,7 +534,7 @@ export function memoryHeadline(options: {activeCount: number;
   return `上次你确认的 ${options.activeCount} 条规则，本次审查已生效`;
 }
 
-/** 记忆写入表单的种类封闭词表，与 modou/agent/memory.py 的 _KINDS 同源。 */
+/** 记忆写入表单的种类封闭词表，与 patchgauge/agent/memory.py 的 _KINDS 同源。 */
 export function memoryKindOptions(): Array<{value: string; label: string}> {
   return Object.entries(MEMORY_KINDS)
     .map(([value, item]) => ({value, label: item.label}));
@@ -924,17 +924,17 @@ export function workspacePresentation(
   };
 }
 
-export type EventLane = "模型建议" | "水木验码执行" | "测试执行";
+export type EventLane = "模型建议" | "PatchGauge执行" | "测试执行";
 
 /** 时间线的分权归位。未知事件默认落到执行方，保留 kind 供人工审计。 */
 export function laneOf(event: {kind: string; data?: Record<string, unknown>}): EventLane {
   const kind = event.kind;
   const source = String(event.data?.source || "");
-  if (kind === "scheduler.action") return "水木验码执行";
-  if (kind === "model.action" && source === "deterministic") return "水木验码执行";
-  if (kind === "scheduler.deterministic_order") return "水木验码执行";
+  if (kind === "scheduler.action") return "PatchGauge执行";
+  if (kind === "model.action" && source === "deterministic") return "PatchGauge执行";
+  if (kind === "scheduler.deterministic_order") return "PatchGauge执行";
   if (kind === "scheduler.next" && event.data?.selection !== "model_reprioritized") {
-    return "水木验码执行";
+    return "PatchGauge执行";
   }
   if (kind === "scheduler.next" && event.data?.selection === "model_reprioritized") {
     return "模型建议";
@@ -943,7 +943,7 @@ export function laneOf(event: {kind: string; data?: Record<string, unknown>}): E
       || kind === "plan.drafted") return "模型建议";
   if (kind.startsWith("test.") || kind.startsWith("pytest.")
       || kind === "observation.recorded") return "测试执行";
-  return "水木验码执行";
+  return "PatchGauge执行";
 }
 
 export function laneEvents<T extends {kind: string; data?: Record<string, unknown>}>(
@@ -951,8 +951,8 @@ export function laneEvents<T extends {kind: string; data?: Record<string, unknow
   live: boolean,
 ): Array<{lane: EventLane; events: T[]}> {
   const lanes: EventLane[] = live
-    ? ["模型建议", "水木验码执行", "测试执行"]
-    : ["水木验码执行", "测试执行"];
+    ? ["模型建议", "PatchGauge执行", "测试执行"]
+    : ["PatchGauge执行", "测试执行"];
   return lanes.map(lane => ({lane, events: events.filter(event => {
     const assigned = laneOf(event);
     // 智能体泳道以外的视图不展示模型请求、模型动作或建议事件；
@@ -1228,7 +1228,7 @@ const PASSPORT_RESTORE_LABELS: Record<EvidencePassportRestoreStatus, string> = {
   not_recorded: "未记录",
 };
 
-// 护照只在终态盖章。终态集与 modou/agent/review.py 的 TERMINAL 一一对应；
+// 护照只在终态盖章。终态集与 patchgauge/agent/review.py 的 TERMINAL 一一对应；
 // 其余一切状态（含未知与缺省）都是"进行中"，绝不落进 COMPLETE——
 // 白名单式反转会把 DRAFTING、REPLANNING、AWAITING_HUMAN 全部盖成"已完成"。
 const PASSPORT_TERMINAL_STATUSES = new Set([
@@ -1328,24 +1328,24 @@ export function evidencePassport(
 /** 完成页首句：只陈述事件先后，不声称模型更快或更准。 */
 export function modelConclusion(participation: ModelParticipation, label = "模型"): string {
   if (!participation.live) {
-    return "本次运行未调用模型，调度由确定性策略完成；实验结论来自水木验码的独立执行。";
+    return "本次运行未调用模型，调度由确定性策略完成；实验结论来自PatchGauge的独立执行。";
   }
   let conclusion: string;
   if (participation.state === "partial") {
     conclusion = label + " 参与了本次运行的调度，其中发生过降级为确定性策略；"
-      + "实验结论仍全部来自水木验码的独立执行。";
+      + "实验结论仍全部来自PatchGauge的独立执行。";
   } else if (participation.state === "kept_order") {
     conclusion = label + " 观察真实实验后选择保持原顺序；"
-      + "随后水木验码按顺序独立执行 pytest 并生成证据。";
+      + "随后PatchGauge按顺序独立执行 pytest 并生成证据。";
   } else {
     const change = participation.orderChanges[0] || "";
     const [before, after] = change.split("→").map(part => part.trim());
     if (before && after && before !== after) {
       conclusion = `${label} 根据上一步真实观测和剩余预算，将 ${after} 提到 ${before} 之前；`
-        + "随后水木验码独立执行 pytest 并生成证据。";
+        + "随后PatchGauge独立执行 pytest 并生成证据。";
     } else {
       conclusion = label + " 根据真实观测调整了检查顺序；"
-        + "随后水木验码独立执行 pytest 并生成证据。";
+        + "随后PatchGauge独立执行 pytest 并生成证据。";
     }
   }
   if (participation.recommendationFailed) {
@@ -1622,7 +1622,7 @@ export function draftCardRows(draft: ReviewDraft,
 }
 
 // ---- 一句话定位代码：命中证据与回退原因的中文呈现 ----------------
-// evidence_detail 是 modou/locate.py 的封闭英文格式；这里逐类翻译。
+// evidence_detail 是 patchgauge/locate.py 的封闭英文格式；这里逐类翻译。
 // 未识别的格式原样透出——证据翻译错了比不翻译更糟，绝不编造依据。
 const DETAIL_SYMBOL = /^symbol '(.+)' defined at line (\d+)$/;
 const DETAIL_FILENAME = /^filename contains '(.+)'$/;
@@ -1633,7 +1633,7 @@ export function locateEvidenceLabel(kind: string, detail: string): string {
   const symbol = DETAIL_SYMBOL.exec(detail);
   if (kind === "symbol" && symbol) return `符号 ${symbol[1]} 定义于第 ${symbol[2]} 行`;
   const directory = DETAIL_DIRECTORY.exec(detail);
-  // 后端目录命中发的 kind 是 "filename"（见 modou/locate.py search_repo），
+  // 后端目录命中发的 kind 是 "filename"（见 patchgauge/locate.py search_repo），
   // detail 才是证据本身：目录命中按 detail 分派，不依赖 kind。
   if (directory) return `目录名包含「${directory[1]}」`;
   const filename = DETAIL_FILENAME.exec(detail);

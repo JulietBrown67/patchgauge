@@ -10,7 +10,7 @@ root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
 sys.path.insert(0, str(root / "tests"))
 
-from modou import paths                                             # noqa: E402
+from patchgauge import paths                                             # noqa: E402
 
 
 def _hold_suite_lock():
@@ -29,7 +29,7 @@ def _hold_suite_lock():
     就不冲突，这时拦下来才是误伤。`flock` 是进程活着才持有的，进程被杀也会
     自动释放，所以不会留下需要人去清的僵尸锁。
     """
-    if os.environ.get("MODOU_ALLOW_CONCURRENT_SUITE") == "1":
+    if os.environ.get("PATCHGAUGE_ALLOW_CONCURRENT_SUITE") == "1":
         # 明确知道 scratch 不共用时的出口。留着它是因为演示当天不该被一把
         # 解释不清的锁挡住——但默认必须是拦。
         return None
@@ -46,7 +46,7 @@ def _hold_suite_lock():
               f"  锁文件：{lock_path}\n"
               "并发跑同一套测试会互相把 worktree 打成孤儿，失败集合每次都不一样。\n"
               "等它跑完再来；确认两边 scratch 不共用时可用 "
-              "MODOU_ALLOW_CONCURRENT_SUITE=1 跳过。", file=sys.stderr)
+              "PATCHGAUGE_ALLOW_CONCURRENT_SUITE=1 跳过。", file=sys.stderr)
         raise SystemExit(2)
     os.ftruncate(fd, 0)
     os.write(fd, (f"pid={os.getpid()} 起于={time.strftime('%Y-%m-%d %H:%M:%S')} "
@@ -143,7 +143,7 @@ passed = len(names) - len(fails)
 print(f"\n{passed}/{len(names)} 通过"
       + (f"，失败：{fails}" if fails else "，全部通过"))
 result = {
-    "schema_version": "modou-test-result-v1",
+    "schema_version": "patchgauge-test-result-v1",
     "suite": "python",
     "collected": len(names),
     "total": len(names),

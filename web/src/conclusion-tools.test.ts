@@ -66,7 +66,7 @@ describe("passport markdown export", () => {
 
   it("carries exactly the fields the passport card shows", () => {
     const text = passportMarkdown(view);
-    expect(text.split("\n")[0]).toBe("# 水木验码 · 证据护照");
+    expect(text.split("\n")[0]).toBe("# PatchGauge · 证据护照");
     for (const line of ["- 状态：已完成", "- 新增代码行数：22 行", "- 承重行数：4 行",
       "- 具名失败测试数：1 个", "- 无据行数：3 行", "- 游离行数：2 行",
       "- 恢复状态：已验证", "- 计划指纹：plan-demo-sha",

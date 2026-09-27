@@ -1,9 +1,9 @@
 {
-  "name": "shuimu-yanma-review-cockpit",
+  "name": "patchgauge-web",
   "private": true,
   "author": "杨佩立（清华大学）",
   "license": "UNLICENSED",
-  "version": "0.1.0",
+  "version": "0.2.0-experimental.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -24,5 +24,8 @@
     "@types/react-dom": "~19.2.0",
     "typescript": "~7.0.0",
     "vitest": "~4.1.0"
+  },
+  "overrides": {
+    "dompurify": "3.4.16"
   }
 }

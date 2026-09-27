@@ -20,6 +20,13 @@ jobs:
           cache: pip
           cache-dependency-path: requirements-agent.in
       - run: pip install -r requirements-agent.in
+      - name: Install and smoke-test the built distribution
+        run: |
+          python -m pip wheel . --no-deps --wheel-dir /tmp/patchgauge-wheel
+          python -m venv /tmp/patchgauge-installed
+          /tmp/patchgauge-installed/bin/python -m pip install /tmp/patchgauge-wheel/patchgauge-*.whl
+          /tmp/patchgauge-installed/bin/patchgauge --help
+          /tmp/patchgauge-installed/bin/python -c "from patchgauge import capabilities; assert capabilities.load()"
       - name: Scan public tree and frozen release Notes
         run: python tools/public_release_check.py --root "$GITHUB_WORKSPACE" --notes-file "docs/release/${GITHUB_REF_NAME}.md"
       - name: Verify release metadata and public tree
@@ -57,11 +64,11 @@ jobs:
           set -euo pipefail
           tag="$GITHUB_REF_NAME"
           notes="docs/release/${tag}.md"
-          title="水木验码 $tag"
+          title="PatchGauge $tag"
           if existing="$(gh release view "$tag" --json isPrerelease,body,name,targetCommitish 2>/dev/null)"; then
             RELEASE_JSON="$existing" python tools/release_metadata.py verify-existing-release \
               --tag "$tag" --notes-file "$notes" --title "$title" \
               --expected-public-commit "${{ vars.PUBLIC_COMMIT_SHA }}"
           else
-            gh release create "$tag" --title "$title" --prerelease --notes-file "$notes"
+            gh release create "$tag" --target "$GITHUB_SHA" --title "$title" --prerelease --notes-file "$notes"
           fi

@@ -2,7 +2,7 @@
 
     python3 demo/run_demo.py
 
-它走的是产品的公开接口 `modou.application.analyze_patch`，不是
+它走的是产品的公开接口 `patchgauge.application.analyze_patch`，不是
 `tools/run_one.py`——后者带着 benchmark 的形状，UI 不该看见它。
 """
 from __future__ import annotations
@@ -13,8 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from modou import paths                                            # noqa: E402
-from modou.application import (AnalysisRequest, ExecutionMode,     # noqa: E402
+from patchgauge import paths                                            # noqa: E402
+from patchgauge.application import (AnalysisRequest, ExecutionMode,     # noqa: E402
                                analyze_patch, load_run_bundle,
                                stream_events)
 

@@ -1,5 +1,5 @@
 // T12 教学视图：一次代码干预实验的教学叙述（纯展示，props 形状来自
-// modou/teaching_view.py 的 narrate() 输出）。不做自动评分、不做代写检测。
+// patchgauge/teaching_view.py 的 narrate() 输出）。不做自动评分、不做代写检测。
 import "../master-views.css";
 
 export type TeachingOutcome =

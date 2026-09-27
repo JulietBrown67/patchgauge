@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for helping improve the sanitized public showcase of Shuimu Yanma.
+Thank you for helping improve the sanitized public showcase of PatchGauge.
 
 ## Before opening a change
 

@@ -1,0 +1,66 @@
+{
+  "name": "patchgauge-evidence",
+  "displayName": "PatchGauge · Test Evidence",
+  "version": "0.2.0-experimental.3",
+  "publisher": "patchgauge",
+  "description": "连接本地PatchGauge后台，创建证据任务、打开任务与查看回执。",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Testing"
+  ],
+  "main": "./extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "patchgauge.reviewCurrentChange",
+        "title": "PatchGauge：验收当前改动"
+      },
+      {
+        "command": "patchgauge.openTask",
+        "title": "PatchGauge：打开任务"
+      },
+      {
+        "command": "patchgauge.viewReceipt",
+        "title": "PatchGauge：查看回执"
+      },
+      {
+        "command": "patchgauge.checkDelegated",
+        "title": "PatchGauge：检查受托任务"
+      }
+    ],
+    "configuration": {
+      "title": "PatchGauge",
+      "properties": {
+        "patchgauge.server": {
+          "type": "string",
+          "default": "http://127.0.0.1:8765",
+          "scope": "machine",
+          "description": "已经运行的本地后台地址。"
+        },
+        "patchgauge.pythonPath": {
+          "type": "string",
+          "default": "python3",
+          "scope": "machine",
+          "description": "PatchGauge Python 解释器路径。"
+        },
+        "patchgauge.projectPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "包含 patchgauge/task_client.py 的PatchGauge安装目录。"
+        }
+      }
+    }
+  }
+}

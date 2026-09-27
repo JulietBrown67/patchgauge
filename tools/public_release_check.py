@@ -25,8 +25,8 @@ TEXT_SUFFIXES = {
 }
 PUBLIC_SCAN_EXEMPTIONS = frozenset({
     Path("tools/public_release_check.py"),
-    Path("modou/review_bundle.py"),
-    Path("modou/sensitive.py"),
+    Path("patchgauge/review_bundle.py"),
+    Path("patchgauge/sensitive.py"),
     Path("tests/test_public_smoke.py"),
 })
 
@@ -65,7 +65,7 @@ INTERNAL_RC_CONTENT_ALLOWLIST = {
         "public checkout has its own registry and is checked in public scope"),
 }
 INTERNAL_RC_FORCE_SCAN = frozenset({
-    Path("modou/agent/memory.py"),
+    Path("patchgauge/agent/memory.py"),
     Path("打开方式.md"),
 })
 INTERNAL_MARKER_RULE = "internal_research_marker"
@@ -253,7 +253,7 @@ def _scan_tree(*, scope: str, root: Path, all_files: list[Path],
                 if pattern.search(line):
                     findings.append(f"{relative}:{line_number}: {rule}")
     try:
-        from modou import capabilities
+        from patchgauge import capabilities
         registry = capabilities.load(root / "configs" / "capabilities.json")
         findings.extend(str(item) for item in capabilities.missing_evidence(
             registry, repo=root))
@@ -324,7 +324,7 @@ def _scan(scope: str) -> tuple[list[str], dict[str, list[dict[str, str]]], int]:
             # public Git tree into a temporary directory instead.  This keeps
             # both worktrees untouched and fails closed if any blob is missing.
             try:
-                with tempfile.TemporaryDirectory(prefix="shuimu-public-check-") as raw:
+                with tempfile.TemporaryDirectory(prefix="patchgauge-public-check-") as raw:
                     root = Path(raw)
                     public_files = _materialize_ref(public_ref, root)
                     findings, attributed = _scan_tree(

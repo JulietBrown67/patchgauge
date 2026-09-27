@@ -12,7 +12,7 @@ import {
 } from "./RepoCombobox";
 
 const OPTIONS: RepoOption[] = [
-  {repo_id: "r1", display_name: "水木验码", technical_name: "shuimu-yanma"},
+  {repo_id: "r1", display_name: "PatchGauge", technical_name: "legacy-test-id"},
   {repo_id: "r2", display_name: "退避重试演示", technical_name: "demo-backoff"},
   {repo_id: "r3", display_name: "demo-alpha"},
   {repo_id: "r4", display_name: "Demo-beta", technical_name: "demo-beta-slug"},
@@ -108,7 +108,7 @@ describe("连打匹配", () => {
   it("按 display_name 前缀匹配，大小写不敏感", () => {
     expect(typeaheadMatch(OPTIONS, "demo")).toBe(2);
     expect(typeaheadMatch(OPTIONS, "DEMO")).toBe(2);
-    expect(typeaheadMatch(OPTIONS, "水")).toBe(0);
+    expect(typeaheadMatch(OPTIONS, "P")).toBe(0);
     expect(typeaheadMatch(OPTIONS, "退避")).toBe(1);
   });
 
@@ -116,12 +116,12 @@ describe("连打匹配", () => {
     expect(typeaheadMatch(OPTIONS, "d", 3)).toBe(3);
     expect(typeaheadMatch(OPTIONS, "d", 0)).toBe(2);
     // 从最后一项之后绕回开头
-    expect(typeaheadMatch(OPTIONS, "水", 2)).toBe(0);
+    expect(typeaheadMatch(OPTIONS, "P", 2)).toBe(0);
   });
 
   it("只看 display_name，不拿 technical_name 顶替", () => {
-    // r1 的 technical_name 是 shuimu-yanma，但 "shuimu" 不该命中它
-    expect(typeaheadMatch(OPTIONS, "shuimu")).toBe(-1);
+    // r1 的 technical_name 是 patchgauge，但 "legacy" 不该命中它
+    expect(typeaheadMatch(OPTIONS, "legacy")).toBe(-1);
     // r2 的 technical_name 是 demo-backoff，"demo" 命中的是 display_name 为 demo-alpha 的 r3
     expect(typeaheadMatch(OPTIONS, "demo")).toBe(2);
   });
@@ -137,7 +137,7 @@ describe("连打匹配", () => {
 describe("触发器显示什么", () => {
   it("命中时给出两行；没有 technical_name 就不给第二行", () => {
     expect(triggerView("r1", OPTIONS))
-      .toEqual({label: "水木验码", technical: "shuimu-yanma", empty: false, placeholder: false});
+      .toEqual({label: "PatchGauge", technical: "legacy-test-id", empty: false, placeholder: false});
     const noTech = triggerView("r3", OPTIONS);
     expect(noTech.label).toBe("demo-alpha");
     expect(noTech.technical).toBeUndefined();

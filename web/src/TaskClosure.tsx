@@ -30,7 +30,7 @@ export type TaskCriterion = {criterion_id: string; text: string; finding_ids: st
   action_capabilities?: Record<string, ActionCapability>;
   proposal_attempt?: Record<string, unknown>; experiment?: Record<string, unknown>;
   outcome?: {status: string; improved?: boolean; reason?: string; origin_rows?: unknown[]; followup_rows?: unknown[]}};
-// 服务端形状见 modou/target_mapping.py 的 MappingReport.as_dict()。
+// 服务端形状见 patchgauge/target_mapping.py 的 MappingReport.as_dict()。
 export type TaskTargetMapping = {schema_version?: string;
   mappings: Array<{mapping_id: string; status: string; reason?: string;
     origin?: {file?: string; line?: number};
@@ -603,7 +603,7 @@ export function TaskClosure({reviewId, reviewComplete, offline, ranAsAgent, find
             <option value="js-vitest-demo">JavaScript 测试执行（本产品实验）</option>
             <option value="browser-memory-demo">浏览器规则记忆行为（本产品实验）</option>
           </select></label>
-          {profile && <p className="field-note">实验配置仅适用于已登记的水木验码开发仓库，其他仓库返回不适用。执行或行为证据不等于 Python 逐行实验结论。</p>}
+          {profile && <p className="field-note">实验配置仅适用于已登记的PatchGauge开发仓库，其他仓库返回不适用。执行或行为证据不等于 Python 逐行实验结论。</p>}
           <TaskRequirementsCard value={requirements} onChange={setRequirements} disabled={!!busy} />
           <button className="primary" disabled={!!busy || !requirements.trim()} onClick={() => void create()}>保存要求并开始处置</button>
         </div>}

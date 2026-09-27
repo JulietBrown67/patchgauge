@@ -1,18 +1,20 @@
-# 快速上手
+# PatchGauge quickstart
 
-在公开源码树根目录执行：
+Check out `v0.2.0-experimental.3` from the
+[public repository](https://github.com/JulietBrown67/patchgauge), then run:
 
-```bash
+```sh
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements-agent.in
-python demo/build_demo.py
-python demo/run_demo.py
-(cd web && npm ci)
-(cd web && npm run build)
-python -m modou.server --allow-repo demo/retry_demo --preset-config configs/review-presets.example.json
+. .venv/bin/activate
+python -m pip install .
+patchgauge --help
 ```
 
-打开终端打印的本地地址。先选择项目和验收要求，再查看计划、确认计划并阅读回执。标准确定性路径不调用模型。
+For a trusted, recoverable Python repository, `patchgauge check` previews a
+reversible test-evidence experiment and asks for terminal confirmation. To
+explore the local workspace, use `python -m patchgauge.server` and follow the
+printed address. The web interface is experimental.
 
-公开检查：`python tools/public_release_check.py --root . --notes-file docs/release/v0.2.0-experimental.1.md`、`python tests/run.py`、`(cd web && npm test)` 和 `(cd web && npm run build)`。
+Repository checks: `python tools/public_release_check.py --root . --notes-file
+docs/release/v0.2.0-experimental.3.md`, `python tests/run.py`, and, in `web/`,
+`npm ci`, `npm test`, `npm run build`, and `npm run test:e2e`.

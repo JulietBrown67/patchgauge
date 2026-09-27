@@ -9,7 +9,7 @@ instance_id）。这个 demo 走的是真实用户路径：
 ```
 
 没有 instance_id，没有 scaffold，没有元数据文件。用户手上有什么，
-水木验码就用什么——这正是 00 §一 列的第三条断层。
+PatchGauge就用什么——这正是 00 §一 列的第三条断层。
 
 补丁里刻意安排三态（提交版不展示惰性）：
 
@@ -37,8 +37,8 @@ BASE = {
     # 预置一条用户已确认的仓库记忆：展台「同一仓库跑两次」的演示时刻。
     # 记忆是上下文不是授权；这里只随基线提交一条确认过的规则，让每次
     # 审查开场都能看到只读卡与 review_memory.loaded 事件。
-    ".shuimu/review-memory.yaml": json.dumps({
-        "schema_version": "shuimu-review-memory-v1",
+    ".patchgauge/review-memory.yaml": json.dumps({
+        "schema_version": "patchgauge-review-memory-v1",
         "records": [{
             "memory_id": "backoff-load-bearing-tests",
             "rule": "退避逻辑的承重测试以 tests/test_backoff.py 为准；这一范围已经操作人确认。",

@@ -10,8 +10,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from modou.executor import TrustedLocalExecutor, sanitized_environment
-from modou.review_bundle import build_review_bundle_v2
+from patchgauge.executor import TrustedLocalExecutor, sanitized_environment
+from patchgauge.review_bundle import build_review_bundle_v2
 
 
 def test_public_bundle_removes_private_material():
@@ -144,7 +144,7 @@ def test_public_review_runs_against_a_repo_with_a_skipped_test():
     the published pipeline, not a module that only exists in the private
     research workspace.
     """
-    from modou.application import AnalysisRequest, ExecutionMode, analyze_patch
+    from patchgauge.application import AnalysisRequest, ExecutionMode, analyze_patch
 
     root = Path(tempfile.mkdtemp())
     try:
@@ -172,7 +172,7 @@ def test_repo_snapshot_changes_when_an_already_modified_file_is_edited_again():
     change". Both the approval gate and repair delivery refuse stale work using
     this digest, so it has to follow working-tree content.
     """
-    from modou.server.control import _repo_snapshot
+    from patchgauge.server.control import _repo_snapshot
 
     root = Path(tempfile.mkdtemp())
     try:
@@ -212,7 +212,7 @@ def test_repair_generation_reads_a_data_policy_field_that_exists():
     dataclass does not define raised AttributeError instead, so the gate could
     never pass and candidate generation was unreachable.
     """
-    from modou.agent.spec import DataPolicy
+    from patchgauge.agent.spec import DataPolicy
 
     policy = DataPolicy.parse({
         "model_data_categories": ["metadata", "selected_snippets"]})
@@ -220,7 +220,7 @@ def test_repair_generation_reads_a_data_policy_field_that_exists():
     assert not hasattr(policy, "allowed_categories")
 
     source = (Path(__file__).resolve().parents[1] /
-              "modou" / "server" / "control.py").read_text(encoding="utf-8")
+              "patchgauge" / "server" / "control.py").read_text(encoding="utf-8")
     assert "data_policy.allowed_categories" not in source
 
 
@@ -271,8 +271,8 @@ def test_public_ref_resolves_on_a_pull_request_checkout():
 
 def test_repo_snapshot_tracks_exact_untracked_paths_and_preserves_ascii_digest():
     import hashlib
-    from modou.server.control import _repo_snapshot
-    from modou.safe_git import run_git
+    from patchgauge.server.control import _repo_snapshot
+    from patchgauge.safe_git import run_git
     with tempfile.TemporaryDirectory() as td:
         repo = Path(td)
         (repo / "a.py").write_text("base\n")

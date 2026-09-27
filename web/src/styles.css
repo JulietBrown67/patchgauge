@@ -1401,7 +1401,7 @@ footer p strong { color: var(--text-soft); font-weight: 600; }
 .footer-meta { display: flex; flex-direction: column; gap: 2px; align-items: flex-end; }
 .footer-author { color: var(--text-soft); }
 
-/* 水木验码品牌面：深墨紫承载审计信息，薄荷绿只标示已验证状态。 */
+/* PatchGauge品牌面：深墨紫承载审计信息，薄荷绿只标示已验证状态。 */
 .workspace, .result-overview, .completion-panel, .diff-panel {
   background: var(--scrim-strong); border-color: var(--line);
   box-shadow: 0 22px 60px var(--shadow-1);

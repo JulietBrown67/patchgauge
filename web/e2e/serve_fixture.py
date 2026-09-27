@@ -54,9 +54,9 @@ def build_repo(root: Path) -> Path:
 
 def main() -> int:
     import uvicorn
-    from modou.server import RepoRegistry, ReviewManager, create_app
+    from patchgauge.server import RepoRegistry, ReviewManager, create_app
 
-    workdir = Path(tempfile.mkdtemp(prefix="shuimu-public-flow-"))
+    workdir = Path(tempfile.mkdtemp(prefix="patchgauge-public-flow-"))
     atexit.register(shutil.rmtree, workdir, True)
     repo = build_repo(workdir)
     web_dist = ROOT / "web" / "dist"

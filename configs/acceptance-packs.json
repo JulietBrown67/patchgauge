@@ -1,5 +1,5 @@
 {
-  "schema_version": "shuimu-acceptance-pack-catalog-v1",
+  "schema_version": "patchgauge-acceptance-pack-catalog-v1",
   "catalog_note": "验收包只定义输入与证据边界；结构适配不产生证据，也不把计划中能力伪装成可用。",
   "packs": [
     {
@@ -14,7 +14,7 @@
       "optional_inputs": ["finding_ids", "profile_id", "adoption_mode"],
       "human_gate": "审查计划、候选采用和风险接受仍由用户确认；回执由受控执行产生。",
       "boundary": "结构适配不代表目标缺口已补齐；必须由实验和采用后复验分别证明。",
-      "evidence": ["modou/evidence_experiments.py", "modou/server/tasks.py", "docs/architecture-overview.md"]
+      "evidence": ["patchgauge/evidence_experiments.py", "patchgauge/server/tasks.py", "docs/architecture-overview.md"]
     },
     {
       "id": "multilingual_test_execution",
@@ -28,7 +28,7 @@
       "optional_inputs": ["finding_ids", "adapter_id", "adoption_mode"],
       "human_gate": "选择语言和目标只是登记实验范围；实际运行仍由服务器固定适配器完成。",
       "boundary": "执行通过只表示对应测试事实，不升级为 Python 逐行归因或通用语言支持。",
-      "evidence": ["modou/language_adapters.py", "modou/language_experiments.py"]
+      "evidence": ["patchgauge/language_adapters.py", "patchgauge/language_experiments.py"]
     },
     {
       "id": "browser_behavior",
@@ -70,7 +70,7 @@
       "optional_inputs": ["finding_ids", "profile_id", "adoption_mode"],
       "human_gate": "记忆确认、撤销和规则变化仍需人工操作；历史结果不可被覆盖。",
       "boundary": "当前能力来自版本绑定任务和记忆机制，不等于完成通用回归预测。",
-      "evidence": ["modou/task_receipt.py", "modou/agent/memory.py", "modou/server/tasks.py"]
+      "evidence": ["patchgauge/task_receipt.py", "patchgauge/agent/memory.py", "patchgauge/server/tasks.py"]
     },
     {
       "id": "workflow_delivery",
@@ -84,7 +84,7 @@
       "optional_inputs": ["finding_ids", "language", "adapter_id", "test_targets", "adoption_mode"],
       "human_gate": "触发、采用和外部发布权限必须分别授权；回执完整性不能代替任务验收。",
       "boundary": "本地 CLI、MCP 和回执验证已接线；外部 PR 和多智能体编排仍需实际接入验证。",
-      "evidence": ["modou/task_client.py", "modou/mcp/server.py", "modou/task_receipt.py"]
+      "evidence": ["patchgauge/task_client.py", "patchgauge/mcp/server.py", "patchgauge/task_receipt.py"]
     },
     {
       "id": "domain_evidence",

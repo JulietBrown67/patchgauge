@@ -15,7 +15,7 @@ from tools.release_metadata import verify_existing_release
 
 
 def dry_run(*, tag: str, notes_file: Path) -> dict:
-    title = f"水木验码 {tag}"
+    title = f"PatchGauge {tag}"
     body = notes_file.read_text(encoding="utf-8")
     payload = json.dumps({"isPrerelease": True, "name": title, "body": body,
                           "targetCommitish": "HEAD"}, ensure_ascii=False)

@@ -113,7 +113,7 @@ export function passportMarkdown(view: {
     rows.push(["模型参与", "本次未调用模型 · 确定性调度"]);
   }
   rows.push(["完整 ReviewBundle", view.bundleAvailable ? "已装载，可下载留存" : "本次未装载"]);
-  return ["# 水木验码 · 证据护照", "",
+  return ["# PatchGauge · 证据护照", "",
     ...rows.map(([key, value]) => `- ${key}：${value}`), ""].join("\n");
 }
 

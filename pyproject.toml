@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "shuimu-yanma"
-version = "0.3.0a1"
-description = "水木验码：面向 AI 编程的测试证据验证智能体（个人实用化版）"
+name = "patchgauge"
+version = "0.2.0a3"
+description = "Reversible experiments for test evidence on code changes"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi~=0.141.0",
@@ -18,12 +18,10 @@ dependencies = [
 ]
 
 [project.scripts]
-shuimu = "modou.check:main"
+patchgauge = "patchgauge.check:main"
 
 [tool.setuptools.packages.find]
-include = ["modou*"]
+include = ["patchgauge*"]
 
 [tool.setuptools.package-data]
-# 能力注册表随包安装（wheel 安装后源码树 configs/ 不存在）；
-# 与源码树 configs/capabilities.json 的同一性由 test_packaged_imports 钉住。
-modou = ["configs/*.json"]
+patchgauge = ["configs/*.json"]

@@ -1,4 +1,4 @@
-// T12 教学视图组件测试：形状来自 modou/teaching_view.py 的 narrate() 输出。
+// T12 教学视图组件测试：形状来自 patchgauge/teaching_view.py 的 narrate() 输出。
 // 直接函数调用返回 React 元素树；用递归收集渲染文本后断言。
 import {describe, expect, it} from "vitest";
 import {TeachingView, teachingOutcomeLabel,
