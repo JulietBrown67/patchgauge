@@ -1,6 +1,6 @@
 {
   "schema_version": "public-v02-release-tree-v1",
-  "source_ref": "4037515a43143bbd51f8b3ddae8e7685d04f185f",
+  "source_ref": "53f17d8f1f19f1f5f5853c0aab210062bb68fa30",
   "base_ref": "d3fdc61db46e9498d2faa1988dd837003cd18728",
   "manifest_version": "public-v02-tree-manifest-v2",
   "file_count": 232,
@@ -613,7 +613,7 @@
     "patchgauge.server.chat",
     "patchgauge.typescript_adapter"
   ],
-  "tree_sha256": "2bb2730052ca17fa96183da3510258615f1d44ca1fb806ee6b0d0447e413565b",
+  "tree_sha256": "aba797503495c3d124707534c77274df1d9a665d156360b9b77f481fd1b0f36d",
   "scan": {
     "status": "PASS",
     "findings": [],
