@@ -4,7 +4,7 @@
   "base_ref": "bc5302816fa548bda1902cb117d2ade36d885537",
   "manifest_version": "public-v02-tree-manifest-v2",
   "file_count": 235,
-  "overlay_count": 213,
+  "overlay_count": 212,
   "added_count": 0,
   "files": [
     ".github/workflows/ci.yml",
@@ -244,7 +244,6 @@
     "web/vite.config.ts"
   ],
   "overlay_files": [
-    ".github/workflows/ci.yml",
     ".github/workflows/release.yml",
     "CHANGELOG.md",
     "CODE_OF_CONDUCT.md",
@@ -460,6 +459,7 @@
   ],
   "added_files": [],
   "substituted_files": [
+    ".github/workflows/ci.yml <- configs/public-v02-ci-workflow.yml",
     "README.md <- docs/release/public-readme-v0.2.0-experimental.2.md",
     "configs/capabilities.json <- configs/public-v02-capabilities.json",
     "modou/configs/capabilities.json <- configs/public-v02-capabilities.json"
@@ -478,7 +478,7 @@
     "modou.server.chat",
     "modou.typescript_adapter"
   ],
-  "tree_sha256": "3ca650bc7817139c8e26d94436bbc645fcda3cfc6f9615cdab6bd47dd07006f3",
+  "tree_sha256": "bf5b419a2654233eb8e615920e1d113875ea120385692802520a75972a3d1c8c",
   "scan": {
     "status": "PASS",
     "findings": [],
